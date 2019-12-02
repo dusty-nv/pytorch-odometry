@@ -1,6 +1,7 @@
 import os
 import math
 import torch
+import numpy
 
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
@@ -106,8 +107,9 @@ class MichiganIndoorDataset(Dataset):
 		img_1 = load_image(self.images[img_set][img_num])
 		img_2 = load_image(self.images[img_set][img_num+1])
 		img_0 = Image.new('L', img_1.size, (0))
+		#img_0 = Image.fromarray(numpy.asarray(img_2) - numpy.asarray(img_1))
 
-		img = Image.merge("RGB", (img_1, img_1, img_0))	# TODO what to do about third band
+		img = Image.merge("RGB", (img_1, img_2, img_0))	# TODO try img_2-img_1 for third band?
 
 		if self.transform is not None:
 			img = self.transform(img)
