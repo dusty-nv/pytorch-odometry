@@ -25,7 +25,9 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 
 from reshape import reshape_model
+
 from datasets import MichiganIndoorDataset
+from datasets import TUMSlamDataset
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -37,6 +39,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch OdometryNet Training')
 
 parser.add_argument('data', metavar='DIR', help='path to dataset')
+parser.add_argument('--dataset', default='tum', help='dataset type: tum, icl, michigan (default: tum)')
 parser.add_argument('--model-dir', type=str, default='', 
 				help='path to desired output directory for saving model '
 					'checkpoints (default: current directory)')
@@ -160,30 +163,32 @@ def main_worker(gpu, ngpus_per_node, args):
     normalize = transforms.Normalize(mean=[0,0,0], #mean=[0.485, 0.456, 0.406],
                                      std=[1,1,1])  #std=[0.229, 0.224, 0.225])
 
-    train_dataset = MichiganIndoorDataset(
-        root_dir=args.data,
-        type='train',
-        transform=transforms.Compose([
+    train_transform = transforms.Compose([
             transforms.Resize((args.resolution, args.resolution)),
             #transforms.RandomResizedCrop(args.resolution),
             #transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
-        ]))
+        ])
 
-    val_dataset = MichiganIndoorDataset(
-        root_dir=args.data,
-        type='val',
-        transform=transforms.Compose([
+    val_transform = transform=transforms.Compose([
             transforms.Resize((args.resolution, args.resolution)),
             #transforms.Resize(256),
             #transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             normalize,
-        ]))
+        ])
+
+    if args.dataset == "tum" or args.dataset == "icl":
+        train_dataset = TUMSlamDataset(root_dir=args.data, type='train', transform=train_transform)
+        val_dataset = TUMSlamDataset(root_dir=args.data, type='val', transform=val_transform)
+    elif args.dataset == "michigan":
+        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', transform=train_transform)
+        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', transform=val_transform)
 
     output_dims = train_dataset.output_dims()
 
+    print('=> dataset:  ' + args.dataset)
     print('=> dataset training images:   ' + str(len(train_dataset)))
     print('=> dataset validation images: ' + str(len(val_dataset)))
     print('=> dataset output dims:  ' + str(output_dims))
