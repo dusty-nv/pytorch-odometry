@@ -64,6 +64,9 @@ parser.add_argument('-b', '--batch-size', default=8, type=int,
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
+parser.add_argument('--lr-decay', '--learning-rate-decay', default=30, type=int,
+                    metavar='LR-DECAY', dest='lr_decay',
+                    help='the number of epochs after which to decay the learning date (default: 30 epochs)')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
@@ -262,10 +265,10 @@ def main_worker(gpu, ngpus_per_node, args):
             args.start_epoch = checkpoint['epoch']
             #best_acc1 = checkpoint['best_acc1']
             best_loss = checkpoint['best_loss']
-            if args.gpu is not None:
+            #if args.gpu is not None:
                 # best_acc1 may be from a checkpoint from a different GPU
                 #best_acc1 = best_acc1.to(args.gpu)
-                best_loss = best_loss.to(args.gpu)
+            #    best_loss = best_loss.to(args.gpu)
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -498,7 +501,8 @@ class ProgressMeter(object):
 #
 def adjust_learning_rate(optimizer, epoch, args):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = args.lr * (0.1 ** (epoch // 30))
+    lr = args.lr * (0.1 ** (epoch // args.lr_decay)) #30))
+    print('learning_rate => {:f}'.format(lr))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
