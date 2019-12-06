@@ -1,7 +1,7 @@
 import os
 import math
 import torch
-import numpy
+import numpy as np
 
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
@@ -104,12 +104,21 @@ class MichiganIndoorDataset(Dataset):
 
 		#print('idx {:04d}  set {:d}  num {:03d}/{:03d}  {:s}'.format(idx, img_set, img_num, len(self.images[img_set]), self.images[img_set][img_num]))
 
-		img_1 = load_image(self.images[img_set][img_num])
-		img_2 = load_image(self.images[img_set][img_num+1])
-		img_0 = Image.new('L', img_1.size, (0))
-		#img_0 = Image.fromarray(numpy.asarray(img_2) - numpy.asarray(img_1))
+		rgb_diff = True
 
-		img = Image.merge("RGB", (img_1, img_2, img_0))	# TODO try img_2-img_1 for third band?
+		if rgb_diff:
+			img_1 = load_image(self.images[img_set][img_num], 'RGB')
+			img_2 = load_image(self.images[img_set][img_num+1], 'RGB')
+			
+			img = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32) #Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
+			img = (img + 255.0) / 2.0
+			img = Image.fromarray(img.astype(np.uint8))		
+		else:
+			img_1 = load_image(self.images[img_set][img_num])
+			img_2 = load_image(self.images[img_set][img_num+1])
+			img_0 = Image.new('L', img_1.size, (0))
+			#img_0 = Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
+			img = Image.merge("RGB", (img_1, img_2, img_0))
 
 		if self.transform is not None:
 			img = self.transform(img)
@@ -118,19 +127,21 @@ class MichiganIndoorDataset(Dataset):
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
 
-		pose_x = pose_2[0] - pose_1[0]
-		pose_y = pose_2[1] - pose_1[1]
-		pose_theta = pose_2[2] - pose_1[2] 
+		pose_delta = [b - a for a, b in zip(pose_1, pose_2)]
+
+		#pose_x = pose_2[0] - pose_1[0]
+		#pose_y = pose_2[1] - pose_1[1]
+		#pose_theta = pose_2[2] - pose_1[2] 
 
 		#print(img)
 		#print('idx {:04d}  d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_x, pose_y, pose_theta))
 		#print('idx {:04d}  x_1 {:f} y_1 {:f} t_1 {:f} x_2 {:f} y_2 {:f} t_2 {:f} d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_1[0], pose_1[1], pose_1[2], pose_2[0], pose_2[1], pose_2[2], pose_x, pose_y, pose_theta))
 
-		return img, torch.Tensor([pose_x, pose_y, pose_theta])
+		return img, torch.Tensor(pose_delta)
 
 
-def load_image(path):
+def load_image(path, type='L'):
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
         img = Image.open(f)
-        return img.convert('L')		# change to grayscale?
+        return img.convert(type)

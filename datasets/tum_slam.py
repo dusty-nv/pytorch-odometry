@@ -1,7 +1,7 @@
 import os
 import math
 import torch
-import numpy
+import numpy as np
 
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
@@ -52,12 +52,21 @@ class TUMSlamDataset(Dataset):
 
 			img_count += img_set_length
 
-		img_1 = load_image(self.images[img_set][img_num])
-		img_2 = load_image(self.images[img_set][img_num+1])
-		img_0 = Image.new('L', img_1.size, (0))
-		#img_0 = Image.fromarray(numpy.asarray(img_2) - numpy.asarray(img_1))
+		rgb_diff = True
 
-		img = Image.merge("RGB", (img_1, img_2, img_0))	# TODO try img_2-img_1 for third band?
+		if rgb_diff:
+			img_1 = load_image(self.images[img_set][img_num], 'RGB')
+			img_2 = load_image(self.images[img_set][img_num+1], 'RGB')
+			
+			img = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32) #Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
+			img = (img + 255.0) / 2.0
+			img = Image.fromarray(img.astype(np.uint8))		
+		else:
+			img_1 = load_image(self.images[img_set][img_num])
+			img_2 = load_image(self.images[img_set][img_num+1])
+			img_0 = Image.new('L', img_1.size, (0))
+			#img_0 = Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
+			img = Image.merge("RGB", (img_1, img_2, img_0))
 
 		if self.transform is not None:
 			img = self.transform(img)
@@ -66,7 +75,8 @@ class TUMSlamDataset(Dataset):
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
 
-		pose_delta = [b - a for a, b in zip(pose_1, pose_2)]
+		pose_multiplier = 1000.0
+		pose_delta = [(b - a) * pose_multiplier for a, b in zip(pose_1, pose_2)]
 
 		#print('idx {:04d}  {:s}'.format(idx, str(pose_delta)))
 		return img, torch.Tensor(pose_delta)
@@ -104,7 +114,7 @@ class TUMSlamDataset(Dataset):
 			print('dataset {:s} length mismatch - {:d} images vs. {:d} poses'.format(path, len(dir_images), len(dir_poses)))
 			return True
 
-		print('({:s}) found {:d} images under {:s}'.format(self.type, len(dir_images), path))
+		print('({:s}) found {:04d} images under {:s}'.format(self.type, len(dir_images), path))
 		self.num_images += len(dir_images)
 
 		self.images.append(dir_images)
@@ -166,8 +176,8 @@ class TUMSlamDataset(Dataset):
 		matches.sort()
 		return matches
 
-def load_image(path):
+def load_image(path, type='L'):
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
         img = Image.open(f)
-        return img.convert('L')		# change to grayscale?
+        return img.convert(type)
