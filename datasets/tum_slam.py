@@ -75,8 +75,9 @@ class TUMSlamDataset(Dataset):
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
 
-		pose_multiplier = 1000.0
-		pose_delta = [(b - a) * pose_multiplier for a, b in zip(pose_1, pose_2)]
+		#pose_multiplier = 1000.0
+		#pose_delta = [(b - a) * pose_multiplier for a, b in zip(pose_1, pose_2)]
+		pose_delta = [b - a for a, b in zip(pose_1, pose_2)]
 
 		#print('idx {:04d}  {:s}'.format(idx, str(pose_delta)))
 		return img, torch.Tensor(pose_delta)

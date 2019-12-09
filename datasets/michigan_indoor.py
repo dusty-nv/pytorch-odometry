@@ -82,7 +82,7 @@ class MichiganIndoorDataset(Dataset):
 		#print(self.images)
 		
 	def output_dims(self):
-		return 3	# x, y, theta
+		return 2   # speed delta, theta delta     #3	# x, y, theta
 			
 	def __len__(self):
 		return self.num_images
@@ -136,6 +136,11 @@ class MichiganIndoorDataset(Dataset):
 		#print(img)
 		#print('idx {:04d}  d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_x, pose_y, pose_theta))
 		#print('idx {:04d}  x_1 {:f} y_1 {:f} t_1 {:f} x_2 {:f} y_2 {:f} t_2 {:f} d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_1[0], pose_1[1], pose_1[2], pose_2[0], pose_2[1], pose_2[2], pose_x, pose_y, pose_theta))
+
+		pose_speed = True
+
+		if pose_speed:
+			pose_delta = [ math.sqrt(pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1]), pose_delta[2] ]
 
 		return img, torch.Tensor(pose_delta)
 
