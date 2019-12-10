@@ -11,6 +11,7 @@ import random
 import shutil
 import time
 import warnings
+import PIL.Image
 
 import torch
 import torch.nn as nn
@@ -51,6 +52,8 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
 parser.add_argument('--resolution', default=224, type=int, metavar='N',
                     help='input NxN image resolution of model (default: 224x224) '
                          'note than Inception models should use 299x299')
+parser.add_argument('--width', default=0, type=int)
+parser.add_argument('--height', default=0, type=int)
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
 parser.add_argument('--epochs', default=35, type=int, metavar='N',
@@ -107,6 +110,12 @@ best_loss = 1000000
 #
 def main():
     args = parser.parse_args()
+
+    if args.width <= 0:
+        args.width = args.resolution
+
+    if args.height <= 0:
+        args.height = args.resolution
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -167,7 +176,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                      std=[1,1,1])  #std=[0.229, 0.224, 0.225])
 
     train_transform = transforms.Compose([
-            transforms.Resize((args.resolution, args.resolution)),
+            transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
             #transforms.RandomResizedCrop(args.resolution),
             #transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -175,7 +184,7 @@ def main_worker(gpu, ngpus_per_node, args):
         ])
 
     val_transform = transform=transforms.Compose([
-            transforms.Resize((args.resolution, args.resolution)),
+            transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
             #transforms.Resize(256),
             #transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
@@ -216,6 +225,8 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         print("=> creating model '{}'".format(args.arch))
         model = models.__dict__[args.arch]()
+
+    print("=> model resolution:  {:d}x{:d}".format(args.width, args.height))
 
     # reshape the model for the number of classes in the dataset
     model = reshape_model(model, args.arch, output_dims)
@@ -310,7 +321,9 @@ def main_worker(gpu, ngpus_per_node, args):
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
-                'resolution': args.resolution,
+                #'resolution': args.resolution,
+                'width': args.width,
+                'height': args.height,
                 'output_dims': output_dims,
                 'state_dict': model.state_dict(),
                 #'best_acc1': best_acc1,
@@ -414,6 +427,10 @@ def validate(val_loader, model, criterion, output_dims, args):
 
             if i % args.print_freq == 0:
                 progress.display(i)
+
+            if args.evaluate:
+                #print("{:04d}:  IMG={:s}".format(i, str(images)))
+                print("{:04d}:  OUT={:s}  GT={:s}".format(i, str(output), str(target)))
 
         #print(' * Acc {top1.avg:.3f}'.format(top1=top1))
         print(' * Avg Loss {:.4e}'.format(losses.avg))

@@ -59,9 +59,13 @@ model.eval()
 print(model)
 
 # create example image data
-resolution = checkpoint['resolution']
-input = torch.ones((1, 3, resolution, resolution)).cuda()
-print('input size:  {:d}x{:d}'.format(resolution, resolution))
+if 'resolution' in checkpoint:
+	resolution = (checkpoint['resolution'], checkpoint['resolution'])
+else:
+	resolution = (checkpoint['height'], checkpoint['width'])
+
+input = torch.ones((1, 3, resolution[0], resolution[1])).cuda()
+print('input size:  {:d}x{:d}'.format(resolution[1], resolution[0]))
 
 # format output model path
 if not opt.output:
