@@ -82,7 +82,7 @@ class MichiganIndoorDataset(Dataset):
 		#print(self.images)
 		
 	def output_dims(self):
-		return 2   # speed delta, theta delta     #3	# x, y, theta
+		return 2   # speed, theta delta     #3	# x, y, theta
 			
 	def __len__(self):
 		return self.num_images
@@ -104,15 +104,16 @@ class MichiganIndoorDataset(Dataset):
 
 		#print('idx {:04d}  set {:d}  num {:03d}/{:03d}  {:s}'.format(idx, img_set, img_num, len(self.images[img_set]), self.images[img_set][img_num]))
 
-		rgb_diff = True
+		rgb_diff = False
 
 		if rgb_diff:
-			img_1 = load_image(self.images[img_set][img_num], 'RGB')
-			img_2 = load_image(self.images[img_set][img_num+1], 'RGB')
+			img_1 = load_image(self.images[img_set][img_num], type='RGB', resolution=224)
+			img_2 = load_image(self.images[img_set][img_num+1], type='RGB', resolution=224)
 			
 			img = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32) #Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
-			img = (img + 255.0) / 2.0
-			img = Image.fromarray(img.astype(np.uint8))		
+			#print('idx {:04d}  img max diff:  {:f}'.format(idx, np.max(img)))			
+			img = (img + 255.0) / 510.0 #/ 2.0
+			#img = Image.fromarray(img.astype(np.uint8))		
 		else:
 			img_1 = load_image(self.images[img_set][img_num])
 			img_2 = load_image(self.images[img_set][img_num+1])
@@ -122,7 +123,9 @@ class MichiganIndoorDataset(Dataset):
 
 		if self.transform is not None:
 			img = self.transform(img)
-		
+		else:
+			img = torch.from_numpy(img.transpose((2, 0, 1)))
+
 		# calc pose deltas
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
@@ -141,12 +144,20 @@ class MichiganIndoorDataset(Dataset):
 
 		if pose_speed:
 			pose_delta = [ math.sqrt(pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1]), pose_delta[2] ]
+			#print('idx {:04d}  velocity {:f} d_theta {:f}'.format(idx, pose_delta[0], pose_delta[1]))
 
+		#print('idx {:04d}  {:s}'.format(idx, str(img)))
 		return img, torch.Tensor(pose_delta)
 
 
-def load_image(path, type='L'):
-    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
-    with open(path, 'rb') as f:
-        img = Image.open(f)
-        return img.convert(type)
+def load_image(path, type='L', resolution=-1):
+	# open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+	with open(path, 'rb') as f:
+		img = Image.open(f)
+		img = img.convert(type)
+
+		if resolution > 0:
+			img = img.resize( (resolution, resolution), Image.NEAREST )
+
+		return img
+
