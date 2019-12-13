@@ -2,16 +2,12 @@
 # converts a saved PyTorch model to ONNX format
 # 
 import os
+import torch
 import argparse
 
-import torch
-import torchvision.models as models
+from models import *
 
-from reshape import reshape_model
-
-model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+model_names = get_model_names()
 
 # parse command line
 parser = argparse.ArgumentParser()
@@ -35,15 +31,30 @@ print('running on device ' + str(device))
 # load the model checkpoint
 print('loading checkpoint:  ' + opt.input)
 checkpoint = torch.load(opt.input)
+
 arch = checkpoint['arch']
+input_channels = checkpoint['input_channels']
+output_dims = checkpoint['output_dims']
+
+if 'resolution' in checkpoint:
+	resolution = (checkpoint['resolution'], checkpoint['resolution'])
+else:
+	resolution = (checkpoint['height'], checkpoint['width'])
+
+if 'pretrained' in checkpoint:
+	pretrained = checkpoint['pretrained']
+else:
+	pretrained = False
 
 # create the model architecture
-print('using model:  ' + arch)
-print('model loss:   ' + str(checkpoint['best_loss']))
-model = models.__dict__[arch](pretrained=True)
+print('using model:    ' + arch)
+print('model epoch:    ' + str(checkpoint['epoch']))
+print('model loss:     ' + str(checkpoint['best_loss']))
+print('model path_err: ' + str(checkpoint['path_error']) if 'path_error' in checkpoint else '0.0')
+print('model inputs:   {:d}x{:d}x{:d}'.format(resolution[1], resolution[0], input_channels))
+print('model outputs:  {:d}'.format(output_dims))
 
-# reshape the model's output
-model = reshape_model(model, arch, checkpoint['output_dims'])
+model = create_model(arch, pretrained=pretrained, input_channels=input_channels, outputs=output_dims)
 
 # load the model weights
 model.load_state_dict(checkpoint['state_dict'])
@@ -59,19 +70,13 @@ model.eval()
 print(model)
 
 # create example image data
-if 'resolution' in checkpoint:
-	resolution = (checkpoint['resolution'], checkpoint['resolution'])
-else:
-	resolution = (checkpoint['height'], checkpoint['width'])
-
-input = torch.ones((1, 3, resolution[0], resolution[1])).cuda()
-print('input size:  {:d}x{:d}'.format(resolution[1], resolution[0]))
+input = torch.ones((1, input_channels, resolution[0], resolution[1])).cuda()
+print('input size:  {:d}x{:d}x{:d}'.format(resolution[1], resolution[0], input_channels))
 
 # format output model path
 if not opt.output:
-	opt.output = arch + '.onnx'
-
-if opt.model_dir and opt.output.find('/') == -1 and opt.output.find('\\') == -1:
+	opt.output = os.path.join(opt.model_dir if opt.model_dir else os.path.dirname(opt.input), arch + '.onnx')
+elif opt.model_dir and opt.output.find('/') == -1 and opt.output.find('\\') == -1:
 	opt.output = os.path.join(opt.model_dir, opt.output)
 
 # export the model
