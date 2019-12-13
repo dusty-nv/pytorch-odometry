@@ -10,7 +10,7 @@ class TUMSlamDataset(Dataset):
 	"""https://vision.in.tum.de/data/datasets/rgbd-dataset"""
 	"""https://www.doc.ic.ac.uk/~ahanda/VaFRIC/iclnuim.html"""
 
-	def __init__(self, root_dir, type='train', transform=None):
+	def __init__(self, root_dir, type='train', input_channels=3, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
@@ -20,7 +20,15 @@ class TUMSlamDataset(Dataset):
 		self.type = type
 		self.root_dir = root_dir		
 		self.transform = transform
+		self.input_channels = input_channels
 		self.num_images = 0
+
+		self.input_mean = [0.0, 0.0]
+		self.input_std = [1.0, 1.0]
+
+		if self.input_channels == 3:
+			self.input_mean.append(0.0)
+			self.input_std.append(1.0)
 
 		self.images = []
 		self.poses = []
