@@ -18,18 +18,18 @@ model_urls = {
 
 class VGG(nn.Module):
 
-    def __init__(self, features, num_classes=1000, init_weights=True):
+    def __init__(self, features, num_classes=1000, fc_features=4096, init_weights=True):
         super(VGG, self).__init__()
         self.features = features
         self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
+            nn.Linear(512 * 7 * 7, fc_features),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, 4096),
+            nn.Linear(fc_features, fc_features),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, num_classes),
+            nn.Linear(fc_features, num_classes),
         )
         if init_weights:
             self._initialize_weights()
@@ -81,10 +81,13 @@ cfgs = {
 }
 
 
-def _vggx(arch, cfg, batch_norm, pretrained, in_channels, progress, **kwargs):
+def _vggx(arch, cfg, batch_norm, pretrained, in_channels, fc_features, progress, **kwargs):
     if pretrained:
         kwargs['init_weights'] = False
+    kwargs['fc_features'] = fc_features
+
     model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm, in_channels=in_channels), **kwargs)
+
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)
@@ -92,9 +95,10 @@ def _vggx(arch, cfg, batch_norm, pretrained, in_channels, progress, **kwargs):
     return model
 
 
-def vgg11x(in_channels=3, pretrained=False, progress=True, **kwargs):
-    return _vggx('vgg11', 'A', False, pretrained, in_channels, progress, **kwargs)
+def vgg11x(in_channels=3, fc_features=4096, pretrained=False, progress=True, **kwargs):
+    return _vggx('vgg11', 'A', False, pretrained, in_channels, fc_features, progress, **kwargs)
 
-def vgg8x(in_channels=3, pretrained=False, progress=True, **kwargs):
-    return _vggx('vgg8', 'A2', False, pretrained, in_channels, progress, **kwargs)
+def vgg8x(in_channels=3, fc_features=4096, pretrained=False, progress=True, **kwargs):
+    return _vggx('vgg8', 'A2', False, pretrained, in_channels, fc_features, progress, **kwargs)
+
 

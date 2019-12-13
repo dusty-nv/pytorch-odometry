@@ -1,7 +1,7 @@
 
 import torchvision.models
 
-from .vggx import vgg11x, vgg8x
+from .vggx import *
 from .reshape import reshape_model
 
 def get_model_names():
@@ -10,18 +10,24 @@ def get_model_names():
 		    and callable(torchvision.models.__dict__[name])]
 
 	names += "vgg8x"
+	names += "vgg8x_1024"
 	names += "vgg11x"
      
 	return sorted(names)
 
 
 def create_model(arch, pretrained=True, input_channels=3, outputs=1000):
-	if arch == "vgg8x":
+	if arch.startswith("vgg8x"):
 		if pretrained:
 			print("warning:  pre-trained vgg8x not available, proceeding without pre-trained model")
 			pretrained = False
 
-		model = vgg8x(in_channels=input_channels, pretrained=pretrained)
+		fc_features = 4096
+
+		if arch == "vgg8x_1024":
+			fc_features = 1024
+
+		model = vgg8x(in_channels=input_channels, fc_features=fc_features, pretrained=pretrained)
 
 	elif arch == "vgg11x":
 		if pretrained and input_channels != 3:
@@ -37,7 +43,7 @@ def create_model(arch, pretrained=True, input_channels=3, outputs=1000):
 		if input_channels != 3:
 			raise Exception("cannot create '{:s}' model with {:d} input channels (only 3)".format(arch, input_channels))
 
-		model = torchvision.models.__dict__[args.arch](pretrained=pretrained)
+		model = torchvision.models.__dict__[arch](pretrained=pretrained)
 
 	if outputs != 1000:
 		model = reshape_model(model, arch, outputs)
