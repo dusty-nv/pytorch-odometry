@@ -10,6 +10,7 @@ import os
 import random
 import shutil
 import time
+import math
 import warnings
 import PIL.Image
 
@@ -23,16 +24,14 @@ import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
-import torchvision.models as models
 
-from reshape import reshape_model
+from models import *
 
 from datasets import MichiganIndoorDataset
 from datasets import TUMSlamDataset
 
-model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+
+model_names = get_model_names()
 
 #
 # parse command-line arguments
@@ -45,7 +44,7 @@ parser.add_argument('--model-dir', type=str, default='',
 				help='path to desired output directory for saving model '
 					'checkpoints (default: current directory)')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
-                    choices=model_names,
+                    #choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
@@ -54,6 +53,7 @@ parser.add_argument('--resolution', default=224, type=int, metavar='N',
                          'note than Inception models should use 299x299')
 parser.add_argument('--width', default=0, type=int)
 parser.add_argument('--height', default=0, type=int)
+parser.add_argument('--input-channels', default=3, type=int, dest='input_channels')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
 parser.add_argument('--epochs', default=35, type=int, metavar='N',
@@ -81,8 +81,11 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
+parser.add_argument('--plot', dest='plot', action='store_true', default=True)
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', default=True,
                     help='use pre-trained model')
+parser.add_argument('--no-pretrained', dest='no_pretrained', action='store_true',
+                    help='do not use pre-trained model')
 parser.add_argument('--world-size', default=-1, type=int,
                     help='number of nodes for distributed training')
 parser.add_argument('--rank', default=-1, type=int,
@@ -101,9 +104,8 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 
-#best_acc1 = 0
-best_loss = 1000000
-
+best_loss = 1000000	# best loss error
+best_path = 1000000 # best path error
 
 #
 # initiate worker threads (if using distributed multi-GPU)
@@ -154,12 +156,15 @@ def main():
 # worker thread (per-GPU)
 #
 def main_worker(gpu, ngpus_per_node, args):
-    #global best_acc1
     global best_loss
+    global best_path
+
     args.gpu = gpu
 
+    print("=> torch:  " + str(torch.__version__))
+
     if args.gpu is not None:
-        print("Use GPU: {} for training".format(args.gpu))
+        print("=> use GPU: {} for training".format(args.gpu))
 
     if args.distributed:
         if args.dist_url == "env://" and args.rank == -1:
@@ -171,11 +176,30 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size, rank=args.rank)
 
-    # data loading code
-    normalize = transforms.Normalize(mean=[0,0,0], #mean=[0.485, 0.456, 0.406],
-                                     std=[1,1,1])  #std=[0.229, 0.224, 0.225])
 
-    train_transform = transforms.Compose([
+    # select the desired dataset
+    if args.dataset == "tum" or args.dataset == "icl":
+        train_dataset = TUMSlamDataset(root_dir=args.data, type='train', input_channels=args.input_channels)
+        val_dataset = TUMSlamDataset(root_dir=args.data, type='val', input_channels=args.input_channels)
+    elif args.dataset == "michigan":
+        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels)
+        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', input_channels=args.input_channels)
+
+    output_dims = train_dataset.output_dims()
+
+    print('=> dataset:  ' + args.dataset)
+    print('=> dataset training images:   ' + str(len(train_dataset)))
+    print('=> dataset validation images: ' + str(len(val_dataset)))
+    print('=> dataset input channels: ' + str(train_dataset.input_channels))
+    print('=> dataset input mean:     ' + str(train_dataset.input_mean))
+    print('=> dataset input std_dev:  ' + str(train_dataset.input_std))
+    print('=> dataset output dims:    ' + str(output_dims))
+
+    # data transforms
+    normalize = transforms.Normalize(mean=train_dataset.input_mean,
+                                     std=train_dataset.input_std)
+
+    train_dataset.transform = transforms.Compose([
             transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
             #transforms.RandomResizedCrop(args.resolution),
             #transforms.RandomHorizontalFlip(),
@@ -183,7 +207,7 @@ def main_worker(gpu, ngpus_per_node, args):
             normalize,
         ])
 
-    val_transform = transform=transforms.Compose([
+    val_dataset.transform = transform=transforms.Compose([
             transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
             #transforms.Resize(256),
             #transforms.CenterCrop(args.resolution),
@@ -191,20 +215,7 @@ def main_worker(gpu, ngpus_per_node, args):
             normalize,
         ])
 
-    if args.dataset == "tum" or args.dataset == "icl":
-        train_dataset = TUMSlamDataset(root_dir=args.data, type='train', transform=train_transform)
-        val_dataset = TUMSlamDataset(root_dir=args.data, type='val', transform=val_transform)
-    elif args.dataset == "michigan":
-        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', transform=train_transform)
-        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', transform=val_transform)
-
-    output_dims = train_dataset.output_dims()
-
-    print('=> dataset:  ' + args.dataset)
-    print('=> dataset training images:   ' + str(len(train_dataset)))
-    print('=> dataset validation images: ' + str(len(val_dataset)))
-    print('=> dataset output dims:  ' + str(output_dims))
-
+    # data loaders
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
@@ -218,18 +229,21 @@ def main_worker(gpu, ngpus_per_node, args):
         val_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # create or load the model if using pre-trained (the default)
-    if args.pretrained:
+    # determined if using pre-trained (the default)
+    if args.pretrained and not args.no_pretrained:
         print("=> using pre-trained model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](pretrained=True)
+        pretrained = True
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        pretrained = False
 
-    print("=> model resolution:  {:d}x{:d}".format(args.width, args.height))
+    # create the model architecture
+    model = create_model(args.arch, pretrained=pretrained, 
+                         input_channels=args.input_channels, 
+                         outputs=output_dims)
 
-    # reshape the model for the number of classes in the dataset
-    model = reshape_model(model, args.arch, output_dims)
+    print("=> model inputs:   {:d}x{:d}x{:d}".format(args.width, args.height, args.input_channels))
+    print("=> model outputs:  {:d}".format(output_dims))
 
     # transfer the model to the GPU that it should be run on
     if args.distributed:
@@ -273,13 +287,8 @@ def main_worker(gpu, ngpus_per_node, args):
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            #best_acc1 = checkpoint['best_acc1']
+            args.start_epoch = checkpoint['epoch'] + 1
             best_loss = checkpoint['best_loss']
-            #if args.gpu is not None:
-                # best_acc1 may be from a checkpoint from a different GPU
-                #best_acc1 = best_acc1.to(args.gpu)
-            #    best_loss = best_loss.to(args.gpu)
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -291,7 +300,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # if in evaluation mode, only run validation
     if args.evaluate:
-        validate(val_loader, model, criterion, output_dims, args)
+        validate(val_loader, model, criterion, args.start_epoch, output_dims, args)
         return
 
     # train for the specified number of epochs
@@ -306,32 +315,32 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, output_dims, args)
 
         # evaluate on validation set
-        #acc1 = validate(val_loader, model, criterion, output_dims, args)
-        loss = validate(val_loader, model, criterion, output_dims, args)
+        loss, path_error = validate(val_loader, model, criterion, epoch, output_dims, args)
 
-        # remember best acc@1 and save checkpoint
-        #is_best = acc1 > best_acc1
-        #best_acc1 = max(acc1, best_acc1)
-        is_best = loss < best_loss
+        # remember best loss and save checkpoint
+        is_best_loss = loss < best_loss
         best_loss = min(loss, best_loss)
         print(' * Best Loss {:.4e}'.format(best_loss))
+
+        is_best_path = path_error < best_path
+        best_path = min(path_error, best_path)
+        print(' * Best Path {:.4e}'.format(best_path))
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             save_checkpoint({
-                'epoch': epoch + 1,
+                'epoch': epoch,
                 'arch': args.arch,
-                #'resolution': args.resolution,
                 'width': args.width,
                 'height': args.height,
+                'input_channels': args.input_channels,
                 'output_dims': output_dims,
+                'pretrained': pretrained,
                 'state_dict': model.state_dict(),
-                #'best_acc1': best_acc1,
-                'best_loss': best_loss,
+                'best_loss': loss,
+                'path_error': path_error,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best, args)
-
-
+            }, is_best_loss, is_best_path, args)
 
 #
 # train one epoch
@@ -393,7 +402,7 @@ def train(train_loader, model, criterion, optimizer, epoch, output_dims, args):
 #
 # measure model performance across the val dataset
 #
-def validate(val_loader, model, criterion, output_dims, args):
+def validate(val_loader, model, criterion, epoch, output_dims, args):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     #top1 = AverageMeter('Acc@1', ':6.2f')
@@ -401,6 +410,18 @@ def validate(val_loader, model, criterion, output_dims, args):
         len(val_loader),
         [batch_time, losses], #[batch_time, losses, top1],
         prefix='Test: ')
+
+    if args.plot:
+        import matplotlib.pyplot as plt
+
+        pose = [0.0, 0.0]     # velocity, heading
+        pose_gt = [0.0, 0.0]
+
+        pose_x = [0.0]
+        pose_y = [0.0]
+        
+        pose_x_gt = [0.0]
+        pose_y_gt = [0.0]
 
     # switch to evaluate mode
     model.eval()
@@ -417,9 +438,7 @@ def validate(val_loader, model, criterion, output_dims, args):
             loss = criterion(output, target)
 
             # measure accuracy and record loss
-            #acc1 = accuracy(output, target, topk=(1, min(5, output_dims)))
             losses.update(loss.item(), images.size(0))
-            #top1.update(acc1[0], images.size(0))
            
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -430,19 +449,70 @@ def validate(val_loader, model, criterion, output_dims, args):
 
             if args.evaluate:
                 #print("{:04d}:  IMG={:s}".format(i, str(images)))
-                print("{:04d}:  OUT={:s}  GT={:s}".format(i, str(output), str(target)))
+                print("{:04d}:  OUT^={:s}  GT^={:s}".format(i, str(output), str(target)))
 
-        #print(' * Acc {top1.avg:.3f}'.format(top1=top1))
+            if args.plot:
+                batch_size = len(output)
+
+                for n in range(batch_size):
+                    output_unnorm = val_loader.dataset.unnormalize(output.cpu().numpy()[n])
+                    target_unnorm = val_loader.dataset.unnormalize(target.cpu().numpy()[n])
+
+                    pose[0] = output_unnorm[0]
+                    pose[1] += output_unnorm[1]
+
+                    pose_gt[0] = target_unnorm[0]
+                    pose_gt[1] += target_unnorm[1]
+
+                    if args.evaluate:
+                        print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
+
+                    prev_idx = len(pose_x) - 1
+
+                    pose_x.append(pose_x[prev_idx] + pose[0] * math.cos(pose[1]))
+                    pose_y.append(pose_y[prev_idx] + pose[0] * math.sin(pose[1]))
+
+                    pose_x_gt.append(pose_x_gt[prev_idx] + pose_gt[0] * math.cos(pose_gt[1]))
+                    pose_y_gt.append(pose_y_gt[prev_idx] + pose_gt[0] * math.sin(pose_gt[1]))
+
+
+        path_error = 0.0
+
+        if args.plot:
+             # compute the path error
+             N = len(pose_x)
+
+             for n in range(N):
+                 path_error += math.sqrt(math.pow(pose_x_gt[n] - pose_x[n], 2) + math.pow(pose_y_gt[n] - pose_y[n], 2))
+
+             # plot the path data
+             plt.plot(pose_x, pose_y, 'b--', label=args.arch)
+             plt.plot(pose_x_gt, pose_y_gt, 'r--', label='groundtruth') #, t, t**2, 'bs', t, t**3, 'g^')
+             plt.suptitle('epoch {:d} (loss={:.4e}, path_err={:.4e})'.format(epoch, losses.avg, path_error))
+             plt.legend(loc="upper left")
+
+             plt_dir = ""
+
+             if args.model_dir:
+                 plt_dir = os.path.join(args.model_dir, 'plots')
+                 if not os.path.exists(plt_dir):
+                    os.makedirs(plt_dir)
+             elif args.resume:
+                 plt_dir = os.path.dirname(args.resume)
+
+             plt.savefig(os.path.join(plt_dir, 'epoch_{:d}.jpg'.format(epoch)))
+             plt.clf()
+
         print(' * Avg Loss {:.4e}'.format(losses.avg))
+        print(' * Path Err {:.4e}'.format(path_error))
 
-    #return top1.avg
-    return losses.avg
+    return losses.avg, path_error
 
 
 #
 # save model checkpoint
 #
-def save_checkpoint(state, is_best, args, filename='checkpoint.pth.tar', best_filename='model_best.pth.tar'):
+def save_checkpoint(state, is_best_loss, is_best_path, args, filename='checkpoint.pth.tar', best_filename='model_best.pth.tar', best_path_filename='model_best_path.pth.tar'):
     """Save a model checkpoint file, along with the best-performing model if applicable"""
 
     # if saving to an output directory, make sure it exists
@@ -454,16 +524,23 @@ def save_checkpoint(state, is_best, args, filename='checkpoint.pth.tar', best_fi
 
         filename = os.path.join(model_path, filename)
         best_filename = os.path.join(model_path, best_filename)
+        best_path_filename = os.path.join(model_path, best_path_filename)
 
     # save the checkpoint
     torch.save(state, filename)
 
     # earmark the best checkpoint
-    if is_best:
+    if is_best_loss:
         shutil.copyfile(filename, best_filename)
         print("saved best model to:  " + best_filename)
-    else:
+
+    if is_best_path:
+        shutil.copyfile(filename, best_path_filename)
+        print("saved best path model to:  " + best_path_filename)
+
+    if not is_best_loss and not is_best_path:
         print("saved checkpoint to:  " + filename)
+
 
 
 #
