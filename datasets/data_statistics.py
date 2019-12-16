@@ -25,7 +25,7 @@ args = parser.parse_args()
 if args.dataset == "tum" or args.dataset == "icl":
 	dataset = TUMSlamDataset(root_dir=args.data, type='train', input_channels=args.input_channels, transform=transforms.ToTensor())
 elif args.dataset == "michigan":
-	dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels, normalize_output=False, transform=transforms.ToTensor())
+	dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(224,224), normalize_output=False, transform=transforms.ToTensor())
 
 print('=> dataset:  ' + args.dataset)
 print('=> dataset images:   ' + str(len(dataset)))
