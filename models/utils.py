@@ -24,7 +24,7 @@ def create_model(arch, pretrained=True, input_channels=3, outputs=1000):
 		if pretrained and input_channels != 3:
 			print("warning:  attempted to use pre-trained '{:s}' model with {:d} input channels".format(arch, input_channels))
 			print("          pre-trained '{:s}' is only available for 3 input channels".format(arch))
-			print("          proceeding to create '{:s}' without pre-trained model")
+			print("          proceeding to create '{:s}' without pre-trained model".format(arch))
 			return False
 
 		return pretrained
