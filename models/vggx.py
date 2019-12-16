@@ -81,7 +81,7 @@ cfgs = {
 }
 
 
-def _vggx(arch, cfg, batch_norm, pretrained, in_channels, fc_features, progress, **kwargs):
+def _vggx(arch, cfg, batch_norm, pretrained, progress, in_channels, fc_features, **kwargs):
     if pretrained:
         kwargs['init_weights'] = False
     kwargs['fc_features'] = fc_features
@@ -96,9 +96,9 @@ def _vggx(arch, cfg, batch_norm, pretrained, in_channels, fc_features, progress,
 
 
 def vgg11x(in_channels=3, fc_features=4096, pretrained=False, progress=True, **kwargs):
-    return _vggx('vgg11', 'A', False, pretrained, in_channels, fc_features, progress, **kwargs)
+    return _vggx('vgg11', 'A', False, pretrained, progress, in_channels, fc_features, **kwargs)
 
 def vgg8x(in_channels=3, fc_features=4096, pretrained=False, progress=True, **kwargs):
-    return _vggx('vgg8', 'A2', False, pretrained, in_channels, fc_features, progress, **kwargs)
+    return _vggx('vgg8', 'A2', False, pretrained, progress, in_channels, fc_features, **kwargs)
 
 
