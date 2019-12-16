@@ -598,7 +598,7 @@ def save_checkpoint(state, is_best_stats, args, filename='checkpoint.pth.tar', b
             stat_name_mod = best_names[n].lower().replace(" ", "_").replace("%", "pct")
             copy_filename = best_filename.format(stat_name_mod)
             shutil.copyfile(filename, copy_filename)
-            print("saved best {:s} model to: {:s}".format(best_names[n], copy_filename))
+            print("saved best {:s} model to: ".format(best_names[n]).ljust(32) + copy_filename)
             has_best = True
 
     #if is_best_loss:
