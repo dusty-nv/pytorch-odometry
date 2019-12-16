@@ -104,8 +104,11 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 
-best_loss = 1000000	# best loss error
-best_path = 1000000 # best path error
+
+best_names  = ['Avg Loss', 'Path ATE', 'Drift RPE', 'Drift %']
+best_format = ['{:.4e}', '{:.4e}', '{:.4e}', '{:9.6f}%']
+best_stats  = [1000000, 1000000, 1000000, 1000000]
+best_epoch  = [0, 0, 0, 0]
 
 #
 # initiate worker threads (if using distributed multi-GPU)
@@ -156,8 +159,8 @@ def main():
 # worker thread (per-GPU)
 #
 def main_worker(gpu, ngpus_per_node, args):
-    global best_loss
-    global best_path
+    global best_stats
+    global best_drift
 
     args.gpu = gpu
 
@@ -182,8 +185,8 @@ def main_worker(gpu, ngpus_per_node, args):
         train_dataset = TUMSlamDataset(root_dir=args.data, type='train', input_channels=args.input_channels)
         val_dataset = TUMSlamDataset(root_dir=args.data, type='val', input_channels=args.input_channels)
     elif args.dataset == "michigan":
-        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels)
-        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', input_channels=args.input_channels)
+        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height))
+        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height))
 
     output_dims = train_dataset.output_dims()
 
@@ -200,7 +203,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                      std=train_dataset.input_std)
 
     train_dataset.transform = transforms.Compose([
-            transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
+            #transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),	# resize now done in dataset
             #transforms.RandomResizedCrop(args.resolution),
             #transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -208,7 +211,7 @@ def main_worker(gpu, ngpus_per_node, args):
         ])
 
     val_dataset.transform = transform=transforms.Compose([
-            transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),
+            #transforms.Resize((args.height, args.width), interpolation=PIL.Image.NEAREST),	# resize now done in dataset
             #transforms.Resize(256),
             #transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
@@ -315,16 +318,33 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, output_dims, args)
 
         # evaluate on validation set
-        loss, path_error = validate(val_loader, model, criterion, epoch, output_dims, args)
+        #loss, path_error, drift_error = validate(val_loader, model, criterion, epoch, output_dims, args)
+        val_stats = validate(val_loader, model, criterion, epoch, output_dims, args)
+        is_best_stats = [a < b for a, b in zip(val_stats, best_stats)]
+
+        print('Best Results (through epoch {:d})'.format(epoch))
+
+        for n in range(len(best_stats)):
+            if is_best_stats[n]:
+                 best_stats[n] = val_stats[n]
+                 best_epoch[n] = epoch
+
+            fmt_str = ' * {:<10s} ' + best_format[n] + '  (epoch {:d})'
+            print(fmt_str.format(best_names[n], best_stats[n], best_epoch[n]))
+
 
         # remember best loss and save checkpoint
-        is_best_loss = loss < best_loss
-        best_loss = min(loss, best_loss)
-        print(' * Best Loss {:.4e}'.format(best_loss))
+        #is_best_loss = loss < best_loss
+        #best_loss = min(loss, best_loss)
+        #print(' * Best Loss  {:.4e}'.format(best_loss))
 
-        is_best_path = path_error < best_path
-        best_path = min(path_error, best_path)
-        print(' * Best Path {:.4e}'.format(best_path))
+        #is_best_path = path_error < best_path
+        #best_path = min(path_error, best_path)
+        #print(' * Best Path  {:.4e}'.format(best_path))
+
+        #is_best_drift = drift_error < best_drift
+        #best_drift = min(drift_error, best_drift)
+        #print(' * Best Drift {:.4e}'.format(best_drift))
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
@@ -337,10 +357,12 @@ def main_worker(gpu, ngpus_per_node, args):
                 'output_dims': output_dims,
                 'pretrained': pretrained,
                 'state_dict': model.state_dict(),
-                'best_loss': loss,
-                'path_error': path_error,
+                'best_loss': val_stats[0], #loss,
+                'path_error': val_stats[1], #path_error,
+                'drift_error': val_stats[2], #drift_error,
+                'drift_pct': val_stats[3],
                 'optimizer' : optimizer.state_dict(),
-            }, is_best_loss, is_best_path, args)
+            }, is_best_stats, args)
 
 #
 # train one epoch
@@ -423,6 +445,11 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
         pose_x_gt = [0.0]
         pose_y_gt = [0.0]
 
+    path_error    = 0.0
+    drift_error   = 0.0
+    drift_pct     = 0.0
+    total_dist_gt = 0.0
+
     # switch to evaluate mode
     model.eval()
 
@@ -469,26 +496,50 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 
                     prev_idx = len(pose_x) - 1
 
-                    pose_x.append(pose_x[prev_idx] + pose[0] * math.cos(pose[1]))
-                    pose_y.append(pose_y[prev_idx] + pose[0] * math.sin(pose[1]))
+                    dx = pose[0] * math.cos(pose[1])
+                    dy = pose[0] * math.sin(pose[1])
 
-                    pose_x_gt.append(pose_x_gt[prev_idx] + pose_gt[0] * math.cos(pose_gt[1]))
-                    pose_y_gt.append(pose_y_gt[prev_idx] + pose_gt[0] * math.sin(pose_gt[1]))
+                    dx_gt = pose_gt[0] * math.cos(pose_gt[1])
+                    dy_gt = pose_gt[0] * math.sin(pose_gt[1])
 
+                    x = pose_x[prev_idx] + dx
+                    y = pose_y[prev_idx] + dy
 
-        path_error = 0.0
+                    x_gt = pose_x_gt[prev_idx] + dx_gt
+                    y_gt = pose_y_gt[prev_idx] + dy_gt
+
+                    path_error += math.sqrt(math.pow(x_gt - x, 2) + math.pow(y_gt - y, 2))
+                    drift_error += math.sqrt(math.pow(dx_gt - dx, 2) + math.pow(dy_gt - dy, 2))
+                    total_dist_gt += math.sqrt(math.pow(dx_gt, 2) + math.pow(dy_gt, 2))
+
+                    pose_x.append(x)
+                    pose_y.append(y)
+
+                    pose_x_gt.append(x_gt)
+                    pose_y_gt.append(y_gt)
+
+        N = len(pose_x)
+
+        drift_pct = drift_error / total_dist_gt * 100.0
+
+        path_error *= 1.0 / float(N)
+        drift_error *= 1.0 / float(N)
 
         if args.plot:
              # compute the path error
-             N = len(pose_x)
+             #for n in range(N):
+             #    path_error += math.sqrt(math.pow(pose_x_gt[n] - pose_x[n], 2) + math.pow(pose_y_gt[n] - pose_y[n], 2))
 
-             for n in range(N):
-                 path_error += math.sqrt(math.pow(pose_x_gt[n] - pose_x[n], 2) + math.pow(pose_y_gt[n] - pose_y[n], 2))
+             #for n in range(1,N):
+             #    total_distance_gt += math.sqrt(math.pow(pose_x_gt[n] - pose_x_gt[n-1], 2) + math.pow(pose_y_gt[n] - pose_y_gt[n-1], 2))
+
+             #drift = path_error / total_distance_gt
 
              # plot the path data
              plt.plot(pose_x, pose_y, 'b--', label=args.arch)
              plt.plot(pose_x_gt, pose_y_gt, 'r--', label='groundtruth') #, t, t**2, 'bs', t, t**3, 'g^')
-             plt.suptitle('epoch {:d} (loss={:.4e}, path_err={:.4e})'.format(epoch, losses.avg, path_error))
+             plt.suptitle('epoch {:d} (loss={:.4e}, N={:d})'.format(epoch, losses.avg, len(val_loader.dataset)))
+             plt.title('path_ATE={:.4e}, drift_RPE={:4e}, drift={:f}%'.format(path_error, drift_error, drift_pct))
              plt.legend(loc="upper left")
 
              plt_dir = ""
@@ -503,17 +554,26 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
              plt.savefig(os.path.join(plt_dir, 'epoch_{:d}.jpg'.format(epoch)))
              plt.clf()
 
-        print(' * Avg Loss {:.4e}'.format(losses.avg))
-        print(' * Path Err {:.4e}'.format(path_error))
+        val_stats = [losses.avg, path_error, drift_error, drift_pct]
 
-    return losses.avg, path_error
+        print('Test Results (epoch {:d})'.format(epoch))
+
+        for n in range(len(best_stats)):
+            fmt_str = ' * {:<10s} ' + best_format[n]
+            print(fmt_str.format(best_names[n], val_stats[n]))
+
+        #print(' * Avg Loss   {:.4e}'.format(losses.avg))
+        #print(' * Path ATE   {:.4e}'.format(path_error))
+        #print(' * Drift RPE  {:.4e}'.format(drift_error))
+        #print(' * Drift %    {:f}%'.format(drift_perc))
+
+    return val_stats
 
 
 #
 # save model checkpoint
 #
-def save_checkpoint(state, is_best_loss, is_best_path, args, filename='checkpoint.pth.tar', best_filename='model_best.pth.tar', best_path_filename='model_best_path.pth.tar'):
-    """Save a model checkpoint file, along with the best-performing model if applicable"""
+def save_checkpoint(state, is_best_stats, args, filename='checkpoint.pth.tar', best_filename='model_best_{:s}.pth.tar'):
 
     # if saving to an output directory, make sure it exists
     if args.model_dir:
@@ -524,21 +584,36 @@ def save_checkpoint(state, is_best_loss, is_best_path, args, filename='checkpoin
 
         filename = os.path.join(model_path, filename)
         best_filename = os.path.join(model_path, best_filename)
-        best_path_filename = os.path.join(model_path, best_path_filename)
+        #best_path_filename = os.path.join(model_path, best_path_filename)
+        #best_drift_filename = os.path.join(model_path, best_drift_filename)
 
     # save the checkpoint
     torch.save(state, filename)
 
     # earmark the best checkpoint
-    if is_best_loss:
-        shutil.copyfile(filename, best_filename)
-        print("saved best model to:  " + best_filename)
+    has_best = False
 
-    if is_best_path:
-        shutil.copyfile(filename, best_path_filename)
-        print("saved best path model to:  " + best_path_filename)
+    for n in range(len(is_best_stats)):
+        if is_best_stats[n]:
+            stat_name_mod = best_names[n].lower().replace(" ", "_").replace("%", "pct")
+            copy_filename = best_filename.format(stat_name_mod)
+            shutil.copyfile(filename, copy_filename)
+            print("saved best {:s} model to: {:s}".format(best_names[n], copy_filename))
+            has_best = True
 
-    if not is_best_loss and not is_best_path:
+    #if is_best_loss:
+    #    shutil.copyfile(filename, best_filename)
+    #    print("saved best loss model to:  " + best_filename)
+
+    #if is_best_path:
+    #    shutil.copyfile(filename, best_path_filename)
+    #    print("saved best path model to:  " + best_path_filename)
+
+    #if is_best_drift:
+    #    shutil.copyfile(filename, best_drift_filename)
+    #    print("saved best drift model to: " + best_drift_filename)
+
+    if not has_best:
         print("saved checkpoint to:  " + filename)
 
 
