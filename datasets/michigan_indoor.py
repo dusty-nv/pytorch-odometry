@@ -9,7 +9,7 @@ from PIL import Image
 class MichiganIndoorDataset(Dataset):
 	"""https://deepblue.lib.umich.edu/data/concern/data_sets/3t945q88k"""
 
-	def __init__(self, root_dir, type='train', input_channels=3, normalize_output=True, transform=None):
+	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), normalize_output=True, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
@@ -20,6 +20,7 @@ class MichiganIndoorDataset(Dataset):
 		self.root_dir = root_dir		
 		self.transform = transform
 		self.input_channels = input_channels
+		self.input_resolution = input_resolution
 		self.normalize_output = normalize_output
 		self.num_images = 0
 
@@ -34,18 +35,21 @@ class MichiganIndoorDataset(Dataset):
 
 		if self.input_channels == 3:
 			self.input_mean.append(0.0)
-			self.input_std.append(1.0) 
+			self.input_std.append(1.0)
+		elif self.input_channels == 6:
+			self.input_mean = [0.19206306, 0.14614561, 0.09136458, 0.19207639, 0.14618525, 0.09142792]
+			self.input_std = [0.07504185, 0.05436901, 0.04752706, 0.07504998, 0.05438552, 0.04758745]
 
-		self.output_mean = [0.21042515, 0.4170771]
-		self.output_std = [0.05743989, 0.04943629]
+		self.output_mean = [0.23120594, 0.41055515]  #[0.21042515, 0.4170771] (these were with T_2 enabled)
+		self.output_std = [0.07026415, 0.06002634]   #[0.05743989, 0.04943629] (these were with T_2 enabled)
 
 		self.images = []
 		self.poses = []
 
 		if type == 'train':
-			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1', 'Dataset_T_2']
+			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1']#, 'Dataset_T_2']
 		elif type == 'val':
-			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1', 'Dataset_T_2']
+			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1']#, 'Dataset_T_2']
 
 		for subdir in img_subdirs:
 			dir_path = os.path.join(root_dir, 'dataset', subdir)
@@ -158,8 +162,10 @@ class MichiganIndoorDataset(Dataset):
 			img = (img + 255.0) / 510.0 #/ 2.0
 			#img = Image.fromarray(img.astype(np.uint8))		
 		else:
-			img_1 = load_image(self.images[img_set][img_num])
-			img_2 = load_image(self.images[img_set][img_num+1])
+			img_type = 'RGB' if self.input_channels == 6 else 'L'
+ 
+			img_1 = load_image(self.images[img_set][img_num], type=img_type, resolution=self.input_resolution)
+			img_2 = load_image(self.images[img_set][img_num+1], type=img_type, resolution=self.input_resolution)
 
 			if self.input_channels == 2:
 				img = Image.merge("LA", (img_1, img_2))
@@ -174,6 +180,9 @@ class MichiganIndoorDataset(Dataset):
 					img_0 = Image.new('L', img_1.size, (0))
 
 				img = Image.merge("RGB", (img_1, img_2, img_0))
+			elif self.input_channels == 6:
+				# merge into HxWx6 numpy array
+				img = np.concatenate((np.asarray(img_1), np.asarray(img_2)), axis=2)
 			else:
 				raise Exception('invalid in_channels {:d}'.format(self.input_channels))
 
@@ -255,14 +264,14 @@ def scale(value, range_min, range_max):
 	r = range_max - range_min
 	return (value - range_min) / r
 
-def load_image(path, type='L', resolution=-1):
+def load_image(path, type='L', resolution=(-1, -1)):
 	# open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
 	with open(path, 'rb') as f:
 		img = Image.open(f)
 		img = img.convert(type)
 
-		if resolution > 0:
-			img = img.resize( (resolution, resolution), Image.NEAREST )
+		if resolution[0] > 0 and resolution[1] > 0:
+			img = img.resize( resolution, Image.NEAREST )
 
 		return img
 
