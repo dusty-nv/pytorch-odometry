@@ -25,13 +25,11 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 
-from models import *
-
-from datasets import MichiganIndoorDataset
-from datasets import TUMSlamDataset
-
+from models import create_model, get_model_names
+from datasets import create_dataset, get_dataset_names
 
 model_names = get_model_names()
+dataset_names = get_dataset_names()
 
 #
 # parse command-line arguments
@@ -39,7 +37,7 @@ model_names = get_model_names()
 parser = argparse.ArgumentParser(description='PyTorch OdometryNet Training')
 
 parser.add_argument('data', metavar='DIR', help='path to dataset')
-parser.add_argument('--dataset', default='tum', help='dataset type: tum, icl, michigan (default: tum)')
+parser.add_argument('--dataset', default='tum', help='dataset type: ' + ' | '.join(dataset_names) + ' (default: tum)')
 parser.add_argument('--model-dir', type=str, default='', 
 				help='path to desired output directory for saving model '
 					'checkpoints (default: current directory)')
@@ -181,13 +179,9 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
     # select the desired dataset
-    if args.dataset == "tum" or args.dataset == "icl":
-        train_dataset = TUMSlamDataset(root_dir=args.data, type='train', input_channels=args.input_channels)
-        val_dataset = TUMSlamDataset(root_dir=args.data, type='val', input_channels=args.input_channels)
-    elif args.dataset == "michigan":
-        train_dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height))
-        val_dataset = MichiganIndoorDataset(root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height))
-
+    train_dataset = create_dataset(args.dataset, root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height))
+    val_dataset = create_dataset(args.dataset, root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height))
+    
     output_dims = train_dataset.output_dims()
 
     print('=> dataset:  ' + args.dataset)
@@ -318,8 +312,9 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, output_dims, args)
 
         # evaluate on validation set
-        #loss, path_error, drift_error = validate(val_loader, model, criterion, epoch, output_dims, args)
         val_stats = validate(val_loader, model, criterion, epoch, output_dims, args)
+
+        # compare results to best
         is_best_stats = [a < b for a, b in zip(val_stats, best_stats)]
 
         print('Best Results (through epoch {:d})'.format(epoch))
@@ -332,20 +327,7 @@ def main_worker(gpu, ngpus_per_node, args):
             fmt_str = ' * {:<10s} ' + best_format[n] + '  (epoch {:d})'
             print(fmt_str.format(best_names[n], best_stats[n], best_epoch[n]))
 
-
-        # remember best loss and save checkpoint
-        #is_best_loss = loss < best_loss
-        #best_loss = min(loss, best_loss)
-        #print(' * Best Loss  {:.4e}'.format(best_loss))
-
-        #is_best_path = path_error < best_path
-        #best_path = min(path_error, best_path)
-        #print(' * Best Path  {:.4e}'.format(best_path))
-
-        #is_best_drift = drift_error < best_drift
-        #best_drift = min(drift_error, best_drift)
-        #print(' * Best Drift {:.4e}'.format(best_drift))
-
+        # save model checkpoint
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             save_checkpoint({
@@ -396,15 +378,9 @@ def train(train_loader, model, criterion, optimizer, epoch, output_dims, args):
         # compute output
         output = model(images)
         loss = criterion(output, target)
-        
-        #print('target ' + str(target))
-        #print('output ' + str(output))
-        #print('loss   ' + str(loss))
 	
         # measure accuracy and record loss
-        #acc1 = accuracy(output, target, topk=(1, min(5, output_dims)))
         losses.update(loss.item(), images.size(0))
-        #top1.update(acc1[0], images.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -427,23 +403,20 @@ def train(train_loader, model, criterion, optimizer, epoch, output_dims, args):
 def validate(val_loader, model, criterion, epoch, output_dims, args):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
-    #top1 = AverageMeter('Acc@1', ':6.2f')
     progress = ProgressMeter(
         len(val_loader),
         [batch_time, losses], #[batch_time, losses, top1],
         prefix='Test: ')
 
+    # initialize statistics
     if args.plot:
         import matplotlib.pyplot as plt
 
-        pose = [0.0, 0.0]     # velocity, heading
-        pose_gt = [0.0, 0.0]
+        pose = val_loader.dataset.initial_pose()
+        pose_gt = val_loader.dataset.initial_pose()
 
-        pose_x = [0.0]
-        pose_y = [0.0]
-        
-        pose_x_gt = [0.0]
-        pose_y_gt = [0.0]
+        pose_xyz = [[0.0], [0.0], [0.0]]
+        pose_xyz_gt = [[0.0], [0.0], [0.0]]
 
     path_error    = 0.0
     drift_error   = 0.0
@@ -482,66 +455,57 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
                 batch_size = len(output)
 
                 for n in range(batch_size):
+                    # convert the outputs back into original ranges
                     output_unnorm = val_loader.dataset.unnormalize(output.cpu().numpy()[n])
                     target_unnorm = val_loader.dataset.unnormalize(target.cpu().numpy()[n])
-
-                    pose[0] = output_unnorm[0]
-                    pose[1] += output_unnorm[1]
-
-                    pose_gt[0] = target_unnorm[0]
-                    pose_gt[1] += target_unnorm[1]
 
                     if args.evaluate:
                         print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
 
-                    prev_idx = len(pose_x) - 1
+                    # update the vel/heading pose
+                    pose, xyz_delta = val_loader.dataset.pose_update(pose, output_unnorm)
+                    pose_gt, xyz_delta_gt = val_loader.dataset.pose_update(pose_gt, target_unnorm)
 
-                    dx = pose[0] * math.cos(pose[1])
-                    dy = pose[0] * math.sin(pose[1])
+                    # calc the position delta
+                    #xyz_delta = val_loader.dataset.position_update(pose)
+                    #xyz_delta_gt = val_loader.dataset.position_update(pose_gt)
 
-                    dx_gt = pose_gt[0] * math.cos(pose_gt[1])
-                    dy_gt = pose_gt[0] * math.sin(pose_gt[1])
+                    # update the next position
+                    xyz = []
+                    xyz_gt = []
+                    
+                    prev_idx = len(pose_xyz[0]) - 1
 
-                    x = pose_x[prev_idx] + dx
-                    y = pose_y[prev_idx] + dy
+                    for m in range(len(xyz_delta)):
+                        xyz.append(pose_xyz[m][prev_idx] + xyz_delta[m])
+                        xyz_gt.append(pose_xyz_gt[m][prev_idx] + xyz_delta_gt[m])
 
-                    x_gt = pose_x_gt[prev_idx] + dx_gt
-                    y_gt = pose_y_gt[prev_idx] + dy_gt
+                        pose_xyz[m].append(xyz[m])
+                        pose_xyz_gt[m].append(xyz_gt[m])
 
-                    path_error += math.sqrt(math.pow(x_gt - x, 2) + math.pow(y_gt - y, 2))
-                    drift_error += math.sqrt(math.pow(dx_gt - dx, 2) + math.pow(dy_gt - dy, 2))
-                    total_dist_gt += math.sqrt(math.pow(dx_gt, 2) + math.pow(dy_gt, 2))
+                    # compute the errors
+                    path_error += distance(xyz_gt, xyz)
+                    drift_error += distance(xyz_delta_gt, xyz_delta)
+                    total_dist_gt += magnitude(xyz_delta_gt)
 
-                    pose_x.append(x)
-                    pose_y.append(y)
-
-                    pose_x_gt.append(x_gt)
-                    pose_y_gt.append(y_gt)
-
-        N = len(pose_x)
+        # mean the statistics
+        N = len(pose_xyz[0])
 
         drift_pct = drift_error / total_dist_gt * 100.0
-
         path_error *= 1.0 / float(N)
         drift_error *= 1.0 / float(N)
 
+        # plot the path data
         if args.plot:
-             # compute the path error
-             #for n in range(N):
-             #    path_error += math.sqrt(math.pow(pose_x_gt[n] - pose_x[n], 2) + math.pow(pose_y_gt[n] - pose_y[n], 2))
-
-             #for n in range(1,N):
-             #    total_distance_gt += math.sqrt(math.pow(pose_x_gt[n] - pose_x_gt[n-1], 2) + math.pow(pose_y_gt[n] - pose_y_gt[n-1], 2))
-
-             #drift = path_error / total_distance_gt
-
-             # plot the path data
-             plt.plot(pose_x, pose_y, 'b--', label=args.arch)
-             plt.plot(pose_x_gt, pose_y_gt, 'r--', label='groundtruth') #, t, t**2, 'bs', t, t**3, 'g^')
+             y_axis = 2 if len(pose_xyz[2]) > 1 else 1
+     
+             plt.plot(pose_xyz[0], pose_xyz[y_axis], 'b--', label=args.arch)
+             plt.plot(pose_xyz_gt[0], pose_xyz_gt[y_axis], 'r--', label='groundtruth') #, t, t**2, 'bs', t, t**3, 'g^')
              plt.suptitle('epoch {:d} (loss={:.4e}, N={:d})'.format(epoch, losses.avg, len(val_loader.dataset)))
              plt.title('path_ATE={:.4e}, drift_RPE={:4e}, drift={:f}%'.format(path_error, drift_error, drift_pct))
              plt.legend(loc="upper left")
 
+             # save the plot to disk
              plt_dir = ""
 
              if args.model_dir:
@@ -554,20 +518,33 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
              plt.savefig(os.path.join(plt_dir, 'epoch_{:d}.jpg'.format(epoch)))
              plt.clf()
 
+        # create list of statistics to return
         val_stats = [losses.avg, path_error, drift_error, drift_pct]
 
+        # print out the formatted results
         print('Test Results (epoch {:d})'.format(epoch))
 
         for n in range(len(best_stats)):
             fmt_str = ' * {:<10s} ' + best_format[n]
             print(fmt_str.format(best_names[n], val_stats[n]))
 
-        #print(' * Avg Loss   {:.4e}'.format(losses.avg))
-        #print(' * Path ATE   {:.4e}'.format(path_error))
-        #print(' * Drift RPE  {:.4e}'.format(drift_error))
-        #print(' * Drift %    {:f}%'.format(drift_perc))
-
     return val_stats
+
+
+#
+# vector distance/magnitude
+#
+def distance(a, b):
+    d = 0.0
+    for n in range(len(a)):
+         d += math.pow(b[n] - a[n], 2)
+    return math.sqrt(d)
+
+def magnitude(a):
+    d = 0.0
+    for n in range(len(a)):
+         d += math.pow(a[n], 2)
+    return math.sqrt(d)
 
 
 #

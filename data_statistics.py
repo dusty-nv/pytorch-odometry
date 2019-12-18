@@ -7,14 +7,13 @@ import torch
 import torch.utils.data
 import torchvision.transforms as transforms
 
-from michigan_indoor import MichiganIndoorDataset
-from tum_slam import TUMSlamDataset 
+from datasets import create_dataset, get_dataset_names
 
 
 parser = argparse.ArgumentParser(description='Dataset statistics calculator')
 
 parser.add_argument('data', metavar='DIR', help='path to dataset')
-parser.add_argument('--dataset', default='tum', help='dataset type: tum, icl, michigan (default: tum)')
+parser.add_argument('--dataset', default='tum', help='dataset type: ' + ' | '.join(get_dataset_names()) + ' (default: tum)')
 parser.add_argument('--input-channels', default=3, type=int, dest='input_channels')
 parser.add_argument('-b', '--batch-size', default=128, type=int)
 parser.add_argument('-j', '--workers', default=8, type=int)
@@ -22,10 +21,11 @@ parser.add_argument('-j', '--workers', default=8, type=int)
 args = parser.parse_args()
 
 
-if args.dataset == "tum" or args.dataset == "icl":
-	dataset = TUMSlamDataset(root_dir=args.data, type='train', input_channels=args.input_channels, transform=transforms.ToTensor())
-elif args.dataset == "michigan":
-	dataset = MichiganIndoorDataset(root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(224,224), normalize_output=False, transform=transforms.ToTensor())
+# load the dataset
+dataset = create_dataset(args.dataset, root_dir=args.data, type='train', 
+				     input_channels=args.input_channels, input_resolution=(224,224), 
+				     normalize_output=False, scale_output=False, 
+				     transform=transforms.ToTensor())
 
 print('=> dataset:  ' + args.dataset)
 print('=> dataset images:   ' + str(len(dataset)))
@@ -35,6 +35,30 @@ dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers)
 
+
+# compute output range
+output_dims  = dataset.output_dims()
+output_range = [[1000000.0, -1000000.0] for n in range(output_dims)]
+
+for i, (images, target) in enumerate(dataloader, 0):
+	batch_size = len(target)
+
+	for n in range(batch_size):
+		for m in range(output_dims):
+			x = float(target[n][m])
+
+			output_range[m][0] = min(x, output_range[m][0])
+			output_range[m][1] = max(x, output_range[m][1])
+
+print(' ')
+print('OUTPUT RANGE')
+print(output_range)
+			
+dataset.output_range = output_range
+dataset.scale_output = True
+
+
+# compute mean/std-dev
 input_mean = []
 input_std0 = []
 input_std1 = []

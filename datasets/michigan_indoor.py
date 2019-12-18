@@ -3,35 +3,37 @@ import math
 import torch
 import numpy as np
 
-from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+from ._utils import *
+
+from torch.utils.data import Dataset, DataLoader
+
 
 class MichiganIndoorDataset(Dataset):
 	"""https://deepblue.lib.umich.edu/data/concern/data_sets/3t945q88k"""
 
-	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), normalize_output=True, transform=None):
+	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), 
+			   normalize_output=True, scale_output=True, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
 			transform (callable, optional): Optional transform to be applied
 				on a sample.
 		"""
-		self.type = type
-		self.root_dir = root_dir		
-		self.transform = transform
-		self.input_channels = input_channels
+		self.type       = type
+		self.root_dir   = root_dir		
+		self.transform  = transform
+		self.num_images = 0
+		self.images     = []
+		self.poses      = []
+
+		self.input_channels   = input_channels
 		self.input_resolution = input_resolution
 		self.normalize_output = normalize_output
-		self.num_images = 0
-
-		self.velocity_min = 10000.0
-		self.velocity_max = -10000.0
-
-		self.heading_min = 10000.0
-		self.heading_max = -10000.0
+		self.scale_output 	  = scale_output
 
 		self.input_mean = [0.15399212, 0.15405144]
-		self.input_std = [0.05893139, 0.05895483]
+		self.input_std  = [0.05893139, 0.05895483]
 
 		if self.input_channels == 3:
 			self.input_mean.append(0.0)
@@ -40,96 +42,22 @@ class MichiganIndoorDataset(Dataset):
 			self.input_mean = [0.19206306, 0.14614561, 0.09136458, 0.19207639, 0.14618525, 0.09142792]
 			self.input_std = [0.07504185, 0.05436901, 0.04752706, 0.07504998, 0.05438552, 0.04758745]
 
+		self.output_range = [[0.000000000, 0.112281263], [-0.047858000, 0.069044000]] #[[-1.0, 1.0] for n in range(self.output_dims())]
 		self.output_mean = [0.23120594, 0.41055515]  #[0.21042515, 0.4170771] (these were with T_2 enabled)
 		self.output_std = [0.07026415, 0.06002634]   #[0.05743989, 0.04943629] (these were with T_2 enabled)
 
-		self.images = []
-		self.poses = []
-
+		# select data subsets
 		if type == 'train':
 			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1']#, 'Dataset_T_2']
 		elif type == 'val':
 			img_subdirs = ['Dataset_+', 'Dataset_L', 'Dataset_T_1']#, 'Dataset_T_2']
 
+		# search for images
 		for subdir in img_subdirs:
-			dir_path = os.path.join(root_dir, 'dataset', subdir)
-
-			dir_images = []
-			dir_poses = []
-
-			# gather image files
-			for n in range(1000):
-				image_filename = os.path.join(dir_path, '{:04d}.ppm'.format(n))
-		
-				if os.path.isfile(image_filename):
-					dir_images.append(image_filename)
-
-			# 
-			last_x = 0.0
-			last_y = 0.0
-			last_theta = 0.0
-
-			# parse pose file
-			pose_file = open(os.path.join(dir_path, 'pose.txt'), 'r')
-
-			while True:
-				pose_line = pose_file.readline()
-			
-				if not pose_line:
-					break
-				
-				pose_tokens = pose_line.rstrip().split(' ')
-				
-				if len(pose_tokens) != 4:
-					print('invalid pose: ' + pose_line)
-					break
-
-				pose_x = float(pose_tokens[1])
-				pose_y = float(pose_tokens[2])
-				pose_theta = float(pose_tokens[3])
-
-				#print('{:s}  ({:f}, {:f}) ({:f}, {:f})'.format(img_name, bbox_left, bbox_top, bbox_right, bbox_bottom))
-				dir_poses.append((pose_x, pose_y, pose_theta))
-
-				# determine range of velocity/heading data
-				delta_x = pose_x - last_x
-				delta_y = pose_y - last_y
-				delta_theta = pose_theta - last_theta
-
-				velocity = math.sqrt(delta_x * delta_x + delta_y * delta_y)
-
-				self.velocity_max = max(velocity, self.velocity_max)
-				self.velocity_min = min(velocity, self.velocity_min)
-
-				self.heading_max = max(delta_theta, self.heading_max)
-				self.heading_min = min(delta_theta, self.heading_min)
-
-				last_x = pose_x
-				last_y = pose_y
-				last_theta = pose_theta
-			
-			pose_file.close()
-
-			if len(dir_images) != len(dir_poses):
-				print('dataset {:s} length mismatch - {:d} images vs. {:d} poses'.format(pose_tokens[0], len(dir_images), len(dir_poses)))
-				continue
-
-			print('{:s} - {:d} images'.format(dir_path, len(dir_images)))
-
-			self.images.append(dir_images)
-			self.poses.append(dir_poses)
-
-			self.num_images += len(dir_images) - 1
-
-		print('=> output range:')
-		print('      - velocity  (min={:.9f}) (max={:.9f}) (range={:.9f})'.format(self.velocity_min, self.velocity_max, self.velocity_max - self.velocity_min))
-		print('      - heading Δ (min={:.9f}) (max={:.9f}) (range={:.9f})'.format(self.heading_min, self.heading_max, self.heading_max - self.heading_min))
-
-		#print(str(self.num_images))
-		#print(self.images)
+			self.search_directory(os.path.join(root_dir, 'dataset', subdir))
 		
 	def output_dims(self):
-		return 2   # speed, theta delta     #3	# x, y, theta
+		return 2   # speed, theta delta
 			
 	def __len__(self):
 		return self.num_images
@@ -139,6 +67,7 @@ class MichiganIndoorDataset(Dataset):
 		img_num = 0
 		img_count = 0
 
+		# determine which subset this index lies in
 		for n in range(len(self.images)):
 			img_set_length = len(self.images[n]) - 1
 
@@ -151,41 +80,36 @@ class MichiganIndoorDataset(Dataset):
 
 		#print('idx {:04d}  set {:d}  num {:03d}/{:03d}  {:s}'.format(idx, img_set, img_num, len(self.images[img_set]), self.images[img_set][img_num]))
 
-		rgb_diff = False
+		# load and format the images, depending on number of channels
+		img_type = 'RGB' if self.input_channels == 6 else 'L'
 
-		if rgb_diff:
-			img_1 = load_image(self.images[img_set][img_num], type='RGB', resolution=224)
-			img_2 = load_image(self.images[img_set][img_num+1], type='RGB', resolution=224)
-			
-			img = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32) #Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
-			#print('idx {:04d}  img max diff:  {:f}'.format(idx, np.max(img)))			
-			img = (img + 255.0) / 510.0 #/ 2.0
-			#img = Image.fromarray(img.astype(np.uint8))		
+		img_1 = load_image(self.images[img_set][img_num], type=img_type, resolution=self.input_resolution)
+		img_2 = load_image(self.images[img_set][img_num+1], type=img_type, resolution=self.input_resolution)
+
+		if self.input_channels == 2:
+			# 2 channels
+			#    0 R = img_1 grayscale
+			#	1 G = img_2 grayscale
+			img = Image.merge("LA", (img_1, img_2))
+		elif self.input_channels == 3:
+			# 3 channels
+			#    0 R = img_1 grayscale
+			#	1 G = img_2 grayscale
+			#	2 B = zero 
+			img = Image.merge("RGB", (img_1, img_2, Image.new('L', img_1.size, (0))))
+		elif self.input_channels == 6:
+			# 6 channels
+			#    0 = img_1 R
+			#	1 = img_1 G
+			#	2 = img_1 B
+			#	3 = img_2 R
+			#	4 = img_2 G
+			#	5 = img_2 B
+			img = np.concatenate((np.asarray(img_1), np.asarray(img_2)), axis=2)
 		else:
-			img_type = 'RGB' if self.input_channels == 6 else 'L'
- 
-			img_1 = load_image(self.images[img_set][img_num], type=img_type, resolution=self.input_resolution)
-			img_2 = load_image(self.images[img_set][img_num+1], type=img_type, resolution=self.input_resolution)
+			raise Exception('invalid in_channels {:d}'.format(self.input_channels))
 
-			if self.input_channels == 2:
-				img = Image.merge("LA", (img_1, img_2))
-			elif self.input_channels == 3:
-				gray_diff = False
-
-				if gray_diff:
-					img_0 = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32)
-					img_0 = (img_0 + 255.0) * 0.5
-					img_0 = Image.fromarray(img_0.astype(np.uint8))
-				else:
-					img_0 = Image.new('L', img_1.size, (0))
-
-				img = Image.merge("RGB", (img_1, img_2, img_0))
-			elif self.input_channels == 6:
-				# merge into HxWx6 numpy array
-				img = np.concatenate((np.asarray(img_1), np.asarray(img_2)), axis=2)
-			else:
-				raise Exception('invalid in_channels {:d}'.format(self.input_channels))
-
+		# apply image transform
 		if self.transform is not None:
 			img = self.transform(img)
 		else:
@@ -196,26 +120,11 @@ class MichiganIndoorDataset(Dataset):
 		pose_2 = self.poses[img_set][img_num+1]
 
 		pose_delta = [b - a for a, b in zip(pose_1, pose_2)]
+		pose_delta = [math.sqrt(pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1]), pose_delta[2]]
 
-		#pose_x = pose_2[0] - pose_1[0]
-		#pose_y = pose_2[1] - pose_1[1]
-		#pose_theta = pose_2[2] - pose_1[2] 
-
-		#print(img)
-		#print('idx {:04d}  d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_x, pose_y, pose_theta))
-		#print('idx {:04d}  x_1 {:f} y_1 {:f} t_1 {:f} x_2 {:f} y_2 {:f} t_2 {:f} d_x {:f} d_y {:f} d_theta {:f}'.format(idx, pose_1[0], pose_1[1], pose_1[2], pose_2[0], pose_2[1], pose_2[2], pose_x, pose_y, pose_theta))
-
-		pose_speed = True
-
-		if pose_speed:
-			pose_delta = [ math.sqrt(pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1]), pose_delta[2] ]
-			#print('idx {:04d}  velocity {:f} d_theta {:f}'.format(idx, pose_delta[0], pose_delta[1]))
-
-		scale_output = True
-
-		if scale_output:
-			pose_delta = [ scale(pose_delta[0], self.velocity_min, self.velocity_max),
-						scale(pose_delta[1], self.heading_min, self.heading_max) ]
+		# scale/normalize output
+		if self.scale_output:
+			pose_delta = scale(pose_delta, self.output_range)
 
 		if self.normalize_output:
 			pose_delta = normalize_std(pose_delta, self.output_mean, self.output_std)
@@ -227,51 +136,68 @@ class MichiganIndoorDataset(Dataset):
 		if type != 'output':
 			Exception('type must be output')
 
-		output_min = [self.velocity_min, self.heading_min]
-		output_max = [self.velocity_max, self.heading_max]
+		return unscale(unnormalize_std(value, self.output_mean, self.output_std), self.output_range)
 
-		return unscale(unnormalize_std(value, self.output_mean, self.output_std), output_min, output_max)
+	def initial_pose(self):
+		return [0.0, 0.0]
 
+	def pose_update(self, pose, delta):
+		pose[0] = delta[0]	 # velocity
+		pose[1] += delta[1]  # heading
 
-def normalize_std(value, mean, std):
-	v = []
-	N = len(value)
+		dx = pose[0] * math.cos(pose[1])
+		dy = pose[0] * math.sin(pose[1])
 
-	for n in range(N):
-		v.append( (value[n] - mean[n]) / std[n] )
+		return pose, [dx, dy]
 
-	return v
+	#def position_update(self, pose):
+	#	dx = pose[0] * math.cos(pose[1])
+	#	dy = pose[0] * math.sin(pose[1])
+	#	return [dx, dy]
 
-def unnormalize_std(value, mean, std):
-	v = []
-	N = len(value)
+	def search_directory(self, dir_path):
+		dir_images = []
+		dir_poses = []
 
-	for n in range(N):
-		v.append( (value[n] * std[n]) + mean[n] )
+		# gather image files
+		for n in range(1000):
+			image_filename = os.path.join(dir_path, '{:04d}.ppm'.format(n))
+	
+			if os.path.isfile(image_filename):
+				dir_images.append(image_filename)
 
-	return v
+		# parse pose file
+		pose_file = open(os.path.join(dir_path, 'pose.txt'), 'r')
 
-def unscale(value, range_min, range_max):
-	v = []
-	N = len(value)
+		while True:
+			pose_line = pose_file.readline()
+		
+			if not pose_line:
+				break
+			
+			pose_tokens = pose_line.rstrip().split(' ')
+			
+			if len(pose_tokens) != 4:
+				print('invalid pose: ' + pose_line)
+				break
 
-	for n in range(N):
-		v.append( (value[n] * (range_max[n] - range_min[n])) + range_min[n] )
+			pose_x = float(pose_tokens[1])
+			pose_y = float(pose_tokens[2])
+			pose_theta = float(pose_tokens[3])
 
-	return v
+			#print('{:s}  ({:f}, {:f}) ({:f}, {:f})'.format(img_name, bbox_left, bbox_top, bbox_right, bbox_bottom))
+			dir_poses.append((pose_x, pose_y, pose_theta))
 
-def scale(value, range_min, range_max):
-	r = range_max - range_min
-	return (value - range_min) / r
+		pose_file.close()
 
-def load_image(path, type='L', resolution=(-1, -1)):
-	# open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
-	with open(path, 'rb') as f:
-		img = Image.open(f)
-		img = img.convert(type)
+		if len(dir_images) != len(dir_poses):
+			print('dataset {:s} length mismatch - {:d} images vs. {:d} poses'.format(pose_tokens[0], len(dir_images), len(dir_poses)))
+			return
 
-		if resolution[0] > 0 and resolution[1] > 0:
-			img = img.resize( resolution, Image.NEAREST )
+		print('{:s} - {:d} images'.format(dir_path, len(dir_images)))
 
-		return img
+		self.images.append(dir_images)
+		self.poses.append(dir_poses)
+
+		self.num_images += len(dir_images) - 1
 

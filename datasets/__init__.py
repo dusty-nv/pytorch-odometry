@@ -1,4 +1,7 @@
-print("pytorch-odometry/datasets/__init__.py")
 
-from .michigan_indoor import *
-from .tum_slam import *
+
+#from .michigan_indoor import *
+#from .tum_slam import *
+#from .data_utils import *
+
+from .utils import *

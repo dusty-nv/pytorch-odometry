@@ -3,35 +3,50 @@ import math
 import torch
 import numpy as np
 
-from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+from ._utils import *
+
+from torch.utils.data import Dataset, DataLoader
+from pyquaternion import Quaternion
+
 
 class TUMSlamDataset(Dataset):
 	"""https://vision.in.tum.de/data/datasets/rgbd-dataset"""
 	"""https://www.doc.ic.ac.uk/~ahanda/VaFRIC/iclnuim.html"""
 
-	def __init__(self, root_dir, type='train', input_channels=3, transform=None):
+	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), 
+                  normalize_output=True, scale_output=True, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
 			transform (callable, optional): Optional transform to be applied
 				on a sample.
 		"""
-		self.type = type
-		self.root_dir = root_dir		
-		self.transform = transform
-		self.input_channels = input_channels
+		self.type       = type
+		self.root_dir   = root_dir		
+		self.transform  = transform
 		self.num_images = 0
+		self.images     = []
+		self.poses      = []
 
-		self.input_mean = [0.0, 0.0]
-		self.input_std = [1.0, 1.0]
+		self.input_channels   = input_channels
+		self.input_resolution = input_resolution
+		self.normalize_output = normalize_output
+		self.scale_output 	  = scale_output
+
+		self.input_mean = [0.37613192, 0.37610024]
+		self.input_std = [0.19967583, 0.19966353]
 
 		if self.input_channels == 3:
 			self.input_mean.append(0.0)
 			self.input_std.append(1.0)
+		elif self.input_channels == 6:
+			self.input_mean = [0.387192, 0.37493756, 0.37024707, 0.38716564, 0.37490633, 0.3701989]
+			self.input_std = [0.18855667, 0.20194934, 0.23527457, 0.18855427, 0.20193432, 0.23524201]
 
-		self.images = []
-		self.poses = []
+		self.output_range = [[-0.020121246576309204, 0.20444628596305847], [-0.4495636522769928, 0.005035788752138615], [-0.27828314900398254, 0.03655131906270981], [-1.0000364780426025, 1.0001380443572998], [-0.058813586831092834, 0.06137028709053993], [-0.139356330037117, 0.23180893063545227], [-0.019846243783831596, 0.019199304282665253]] #[[-1.0, 1.0] for n in range(self.output_dims())]
+		self.output_mean = [0.08903043, 0.97326106, 0.88268435, 0.99107015, 0.48926163, 0.3753603, 0.50792235]
+		self.output_std = [0.02054254, 0.01464775, 0.02503456, 0.06498827, 0.03982857, 0.01947158, 0.03847046]
 
 		# TODO split train/val
 		print('({:s}) searching {:s}'.format(type, root_dir))
@@ -40,7 +55,7 @@ class TUMSlamDataset(Dataset):
 		
 	def output_dims(self):
 		# https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats#ground-truth_trajectories
-		return 7	# x, y, z, qx, qy, qz, qw
+		return 7	# tx, ty, tz, qx, qy, qz, qw
 			
 	def __len__(self):
 		return self.num_images
@@ -60,35 +75,86 @@ class TUMSlamDataset(Dataset):
 
 			img_count += img_set_length
 
-		rgb_diff = True
+		# load and format the images, depending on number of channels
+		img_type = 'RGB' if self.input_channels == 6 else 'L'
 
-		if rgb_diff:
-			img_1 = load_image(self.images[img_set][img_num], 'RGB')
-			img_2 = load_image(self.images[img_set][img_num+1], 'RGB')
-			
-			img = np.asarray(img_2).astype(np.float32) - np.asarray(img_1).astype(np.float32) #Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
-			img = (img + 255.0) / 2.0
-			img = Image.fromarray(img.astype(np.uint8))		
+		img_1 = load_image(self.images[img_set][img_num], type=img_type, resolution=self.input_resolution)
+		img_2 = load_image(self.images[img_set][img_num+1], type=img_type, resolution=self.input_resolution)
+
+		if self.input_channels == 2:
+			# 2 channels
+			#    0 R = img_1 grayscale
+			#	1 G = img_2 grayscale
+			img = Image.merge("LA", (img_1, img_2))
+		elif self.input_channels == 3:
+			# 3 channels
+			#    0 R = img_1 grayscale
+			#	1 G = img_2 grayscale
+			#	2 B = zero 
+			img = Image.merge("RGB", (img_1, img_2, Image.new('L', img_1.size, (0))))
+		elif self.input_channels == 6:
+			# 6 channels
+			#    0 = img_1 R
+			#	1 = img_1 G
+			#	2 = img_1 B
+			#	3 = img_2 R
+			#	4 = img_2 G
+			#	5 = img_2 B
+			img = np.concatenate((np.asarray(img_1), np.asarray(img_2)), axis=2)
 		else:
-			img_1 = load_image(self.images[img_set][img_num])
-			img_2 = load_image(self.images[img_set][img_num+1])
-			img_0 = Image.new('L', img_1.size, (0))
-			#img_0 = Image.fromarray(np.asarray(img_2) - np.asarray(img_1))
-			img = Image.merge("RGB", (img_1, img_2, img_0))
+			raise Exception('invalid in_channels {:d}'.format(self.input_channels))
 
+		# apply image transform
 		if self.transform is not None:
 			img = self.transform(img)
-		
+		else:
+			img = torch.from_numpy(img.transpose((2, 0, 1)))
+
 		# calc pose deltas
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
 
-		#pose_multiplier = 1000.0
-		#pose_delta = [(b - a) * pose_multiplier for a, b in zip(pose_1, pose_2)]
-		pose_delta = [b - a for a, b in zip(pose_1, pose_2)]
+		quat_1 = Quaternion(pose_1[6], pose_1[3], pose_1[4], pose_1[5])
+		quat_2 = Quaternion(pose_2[6], pose_2[3], pose_2[4], pose_2[5])
+
+		quat_delta = quat_1.inverse * quat_2
+
+		xyz_delta = [pose_2[n] - pose_1[n] for n in range(3)]
+		xyz_delta = quat_1.rotate(xyz_delta)
+		#xyz_speed = math.sqrt(xyz_delta[0] * xyz_delta[0] + xyz_delta[1] * xyz_delta[1] + xyz_delta[2] * xyz_delta[2])
+
+		pose_delta = xyz_delta + [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w] #quat_delta.q.tolist()
+
+		# scale/normalize output
+		if self.scale_output:
+			pose_delta = scale(pose_delta, self.output_range)
+
+		if self.normalize_output:
+			pose_delta = normalize_std(pose_delta, self.output_mean, self.output_std)
 
 		#print('idx {:04d}  {:s}'.format(idx, str(pose_delta)))
 		return img, torch.Tensor(pose_delta)
+
+	def unnormalize(self, value, type='output'):
+		if type != 'output':
+			Exception('type must be output')
+
+		return unscale(unnormalize_std(value, self.output_mean, self.output_std), self.output_range)
+
+	def initial_pose(self):
+		pose = self.poses[0][0]
+		return [pose[3], pose[4], pose[5], pose[6]]
+
+	def pose_update(self, pose, delta):
+		prev_quat = Quaternion(pose[3], pose[0], pose[1], pose[2])
+
+		delta_xyz  = [delta[0], delta[1], delta[2]]
+		delta_quat = Quaternion(delta[6], delta[3], delta[4], delta[5])
+
+		delta_xyz_rotated = prev_quat.rotate(delta_xyz)
+		next_quat = prev_quat * delta_quat
+
+		return [next_quat.x, next_quat.y, next_quat.z, next_quat.w], delta_xyz_rotated
 
 	def search_directory(self, path):
 		#print('searching ' + path)
@@ -185,8 +251,3 @@ class TUMSlamDataset(Dataset):
 		matches.sort()
 		return matches
 
-def load_image(path, type='L'):
-    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
-    with open(path, 'rb') as f:
-        img = Image.open(f)
-        return img.convert(type)
