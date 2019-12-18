@@ -10,10 +10,10 @@ def get_model_names():
 		    if name.islower() and not name.startswith("__")
 		    and callable(torchvision.models.__dict__[name])]
 
-	names += "resnet18x"
-	names += "vgg8x"
-	names += "vgg8x_1024"
-	names += "vgg11x"
+	names.append("resnet18x")
+	names.append("vgg8x")
+	names.append("vgg8x_1024")
+	names.append("vgg11x")
      
 	return sorted(names)
 
