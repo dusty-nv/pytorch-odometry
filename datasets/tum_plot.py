@@ -192,18 +192,18 @@ if __name__ == "__main__":
 		poses.append([float(i) for i in pose_list[pose_key]])
 
 	# process
-	gt_x = []
-	gt_y = []
-
+	gt_coords = []
 	skip = 1
 
 	for n in range(skip, len(poses)):
 		calc_pos( poses[n-skip], poses[n] )
-		gt_x.append(poses[n][0])
-		gt_y.append(poses[n][2])
+		gt_coords.append([poses[n][0], poses[n][1], poses[n][2]])
 
 	if args.plot:
-		plt.plot(gt_x, gt_y, 'r--', label='groundtruth')
-		plt.suptitle(args.data)
-		plt.savefig(args.plot)
+		gt_coords = list(map(list,zip(*gt_coords)))	# split from [[x,y,z]] -> [[x],[y],[z]]	
+		fig, plots = plt.subplots(1, 2, figsize=(10, 5))		
+		plots[0].plot(gt_coords[0], gt_coords[1], 'r--', label='groundtruth (XY)')
+		plots[1].plot(gt_coords[2], 'r--', label='groundtruth (Z)')
+		fig.suptitle(args.data)
+		fig.savefig(args.plot)
 	

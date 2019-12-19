@@ -139,7 +139,7 @@ class MichiganIndoorDataset(Dataset):
 		return unscale(unnormalize_std(value, self.output_mean, self.output_std), self.output_range)
 
 	def initial_pose(self):
-		return [0.0, 0.0]
+		return [0.0, 0.0], [0.0, 0.0]		# position, orientation
 
 	def pose_update(self, pose, delta):
 		pose[0] = delta[0]	 # velocity
@@ -148,7 +148,7 @@ class MichiganIndoorDataset(Dataset):
 		dx = pose[0] * math.cos(pose[1])
 		dy = pose[0] * math.sin(pose[1])
 
-		return pose, [dx, dy]
+		return [dx, dy], pose			# translation, orientation 
 
 	#def position_update(self, pose):
 	#	dx = pose[0] * math.cos(pose[1])

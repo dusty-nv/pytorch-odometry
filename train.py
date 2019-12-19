@@ -412,11 +412,11 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
     if args.plot:
         import matplotlib.pyplot as plt
 
-        pose = val_loader.dataset.initial_pose()
-        pose_gt = val_loader.dataset.initial_pose()
+        position, orientation = val_loader.dataset.initial_pose()
+        position_gt, orientation_gt = val_loader.dataset.initial_pose()
 
-        pose_xyz = [[0.0], [0.0], [0.0]]
-        pose_xyz_gt = [[0.0], [0.0], [0.0]]
+        position_history = [position]
+        position_history_gt = [position_gt]
 
     path_error    = 0.0
     drift_error   = 0.0
@@ -463,33 +463,25 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
                         print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
 
                     # update the vel/heading pose
-                    pose, xyz_delta = val_loader.dataset.pose_update(pose, output_unnorm)
-                    pose_gt, xyz_delta_gt = val_loader.dataset.pose_update(pose_gt, target_unnorm)
-
-                    # calc the position delta
-                    #xyz_delta = val_loader.dataset.position_update(pose)
-                    #xyz_delta_gt = val_loader.dataset.position_update(pose_gt)
+                    translation, orientation = val_loader.dataset.pose_update(orientation, output_unnorm)
+                    translation_gt, orientation_gt = val_loader.dataset.pose_update(orientation_gt, target_unnorm)
 
                     # update the next position
-                    xyz = []
-                    xyz_gt = []
-                    
-                    prev_idx = len(pose_xyz[0]) - 1
-
-                    for m in range(len(xyz_delta)):
-                        xyz.append(pose_xyz[m][prev_idx] + xyz_delta[m])
-                        xyz_gt.append(pose_xyz_gt[m][prev_idx] + xyz_delta_gt[m])
-
-                        pose_xyz[m].append(xyz[m])
-                        pose_xyz_gt[m].append(xyz_gt[m])
+                    position = vector_add(position, translation)
+                    position_gt = vector_add(position_gt, translation_gt)
 
                     # compute the errors
-                    path_error += distance(xyz_gt, xyz)
-                    drift_error += distance(xyz_delta_gt, xyz_delta)
-                    total_dist_gt += magnitude(xyz_delta_gt)
+                    path_error += distance(position_gt, position)
+                    drift_error += distance(translation_gt, translation)
+                    total_dist_gt += magnitude(translation_gt)
+
+				# add to position history
+                    position_history.append(position)
+                    position_history_gt.append(position_gt)
+
 
         # mean the statistics
-        N = len(pose_xyz[0])
+        N = len(position_history)
 
         drift_pct = drift_error / total_dist_gt * 100.0
         path_error *= 1.0 / float(N)
@@ -497,13 +489,29 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 
         # plot the path data
         if args.plot:
-             y_axis = 2 if len(pose_xyz[2]) > 1 else 1
-     
-             plt.plot(pose_xyz[0], pose_xyz[y_axis], 'b--', label=args.arch)
-             plt.plot(pose_xyz_gt[0], pose_xyz_gt[y_axis], 'r--', label='groundtruth') #, t, t**2, 'bs', t, t**3, 'g^')
-             plt.suptitle('epoch {:d} (loss={:.4e}, N={:d})'.format(epoch, losses.avg, len(val_loader.dataset)))
-             plt.title('path_ATE={:.4e}, drift_RPE={:4e}, drift={:f}%'.format(path_error, drift_error, drift_pct))
-             plt.legend(loc="upper left")
+             # split from [[x,y,z]] -> [[x],[y],[z]]	
+             position_history = list(map(list,zip(*position_history)))	
+             position_history_gt = list(map(list,zip(*position_history_gt)))	
+
+             # create the plots (X/Y and Z, if available)
+             num_plots = 2 if len(position_history) > 2 else 1
+             fig, plots = plt.subplots(1, num_plots, figsize=(10, 5))
+
+             # note that in TUM RGB-D SLAM, the Z coordinate is height
+             plots[0].plot(position_history[0], position_history[1], 'b--', label=args.arch)
+             plots[0].plot(position_history_gt[0], position_history_gt[1], 'r--', label='groundtruth')
+             plots[0].set_xlabel("X (meters)")
+             plots[0].set_ylabel("Y (meters)")
+
+             if num_plots > 1:
+                 plots[1].plot(position_history[2], 'b--', label=args.arch)
+                 plots[1].plot(position_history_gt[2], 'r--', label='groundtruth')
+                 plots[1].set_xlabel("Frame Number")
+                 plots[1].set_ylabel("Z (meters)")
+
+             # set the figure title
+             fig.suptitle('epoch {:d} (loss={:.4e}, N={:d})\npath_ATE={:.4e}, drift_RPE={:4e}, drift={:f}%'.format(epoch, losses.avg, len(val_loader.dataset), path_error, drift_error, drift_pct))
+             fig.legend(loc="upper right")
 
              # save the plot to disk
              plt_dir = ""
@@ -515,8 +523,8 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
              elif args.resume:
                  plt_dir = os.path.dirname(args.resume)
 
-             plt.savefig(os.path.join(plt_dir, 'epoch_{:d}.jpg'.format(epoch)))
-             plt.clf()
+             fig.savefig(os.path.join(plt_dir, 'epoch_{:d}.jpg'.format(epoch)))
+             fig.clf()
 
         # create list of statistics to return
         val_stats = [losses.avg, path_error, drift_error, drift_pct]
@@ -532,7 +540,7 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 
 
 #
-# vector distance/magnitude
+# vector functions
 #
 def distance(a, b):
     d = 0.0
@@ -546,6 +554,11 @@ def magnitude(a):
          d += math.pow(a[n], 2)
     return math.sqrt(d)
 
+def vector_add(a, b):
+    v = []
+    for n in range(len(a)):
+         v.append(a[n] + b[n])
+    return v
 
 #
 # save model checkpoint

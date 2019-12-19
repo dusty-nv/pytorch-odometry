@@ -117,13 +117,13 @@ class TUMSlamDataset(Dataset):
 		quat_1 = Quaternion(pose_1[6], pose_1[3], pose_1[4], pose_1[5])
 		quat_2 = Quaternion(pose_2[6], pose_2[3], pose_2[4], pose_2[5])
 
-		quat_delta = quat_1.inverse * quat_2
+		quat_delta = quat_1.inverse * quat_2				 # relative rotation
 
-		xyz_delta = [pose_2[n] - pose_1[n] for n in range(3)]
-		xyz_delta = quat_1.rotate(xyz_delta)
-		#xyz_speed = math.sqrt(xyz_delta[0] * xyz_delta[0] + xyz_delta[1] * xyz_delta[1] + xyz_delta[2] * xyz_delta[2])
-
-		pose_delta = xyz_delta + [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w] #quat_delta.q.tolist()
+		translation = [pose_2[n] - pose_1[n] for n in range(3)] # global translation
+		translation = quat_1.rotate(translation)			 # relative translation
+	
+		# combine into [translation, orientation]
+		pose_delta = translation + [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w]
 
 		# scale/normalize output
 		if self.scale_output:
@@ -143,18 +143,18 @@ class TUMSlamDataset(Dataset):
 
 	def initial_pose(self):
 		pose = self.poses[0][0]
-		return [pose[3], pose[4], pose[5], pose[6]]
+		return [pose[0], pose[1], pose[2]], [pose[3], pose[4], pose[5], pose[6]]	# position, orientation
 
 	def pose_update(self, pose, delta):
 		prev_quat = Quaternion(pose[3], pose[0], pose[1], pose[2])
 
-		delta_xyz  = [delta[0], delta[1], delta[2]]
-		delta_quat = Quaternion(delta[6], delta[3], delta[4], delta[5])
+		translation = [delta[0], delta[1], delta[2]]					# relative translation
+		delta_quat  = Quaternion(delta[6], delta[3], delta[4], delta[5])	# relative rotation		
 
-		delta_xyz_rotated = prev_quat.rotate(delta_xyz)
-		next_quat = prev_quat * delta_quat
+		translation_rotated = prev_quat.inverse.rotate(translation)		# relative -> global translation
+		next_quat = prev_quat * delta_quat 						# relative -> global rotation
 
-		return [next_quat.x, next_quat.y, next_quat.z, next_quat.w], delta_xyz_rotated
+		return translation_rotated, [next_quat.x, next_quat.y, next_quat.z, next_quat.w] 
 
 	def search_directory(self, path):
 		#print('searching ' + path)
