@@ -24,7 +24,7 @@ args = parser.parse_args()
 # load the dataset
 dataset = create_dataset(args.dataset, root_dir=args.data, type='train', 
 				     input_channels=args.input_channels, input_resolution=(224,224), 
-				     normalize_output=False, scale_output=False, 
+				     normalize_outputs=False, scale_outputs=False, 
 				     transform=transforms.ToTensor())
 
 print('=> dataset:  ' + args.dataset)
@@ -55,7 +55,7 @@ print('OUTPUT RANGE')
 print(output_range)
 			
 dataset.output_range = output_range
-dataset.scale_output = True
+dataset.scale_outputs = True
 
 
 # compute mean/std-dev

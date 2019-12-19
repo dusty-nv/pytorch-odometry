@@ -7,6 +7,7 @@
 #
 import argparse
 import os
+import sys
 import random
 import shutil
 import time
@@ -46,62 +47,44 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
-parser.add_argument('--resolution', default=224, type=int, metavar='N',
-                    help='input NxN image resolution of model (default: 224x224) '
-                         'note than Inception models should use 299x299')
+parser.add_argument('--resolution', default=224, type=int, metavar='N', help='input NxN image resolution of model (default: 224x224)')
 parser.add_argument('--width', default=0, type=int)
 parser.add_argument('--height', default=0, type=int)
 parser.add_argument('--input-channels', default=3, type=int, dest='input_channels')
-parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
-                    help='number of data loading workers (default: 2)')
-parser.add_argument('--epochs', default=35, type=int, metavar='N',
-                    help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=8, type=int,
-                    metavar='N',
-                    help='mini-batch size (default: 8), this is the total '
-                         'batch size of all GPUs on the current node when '
-                         'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
-                    metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('--lr-decay', '--learning-rate-decay', default=30, type=int,
-                    metavar='LR-DECAY', dest='lr_decay',
+parser.add_argument('-j', '--workers', default=8, type=int, metavar='N', help='number of data loading workers (default: 2)')
+parser.add_argument('--epochs', default=35, type=int, metavar='N', help='number of total epochs to run')
+parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
+parser.add_argument('-b', '--batch-size', default=8, type=int, metavar='N', help='mini-batch size (default: 8)')
+parser.add_argument('--lr', '--learning-rate', default=0.001, type=float, metavar='LR', help='initial learning rate', dest='lr')
+parser.add_argument('--lr-decay', '--learning-rate-decay', default=30, type=int, metavar='LR-DECAY', dest='lr_decay',
                     help='the number of epochs after which to decay the learning date (default: 30 epochs)')
-parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
-                    help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)',
-                    dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=10, type=int,
-                    metavar='N', help='print frequency (default: 10)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
-parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
-                    help='evaluate model on validation set')
-parser.add_argument('--plot', dest='plot', action='store_true', default=True)
-parser.add_argument('--pretrained', dest='pretrained', action='store_true', default=True,
-                    help='use pre-trained model')
-parser.add_argument('--no-pretrained', dest='no_pretrained', action='store_true',
-                    help='do not use pre-trained model')
-parser.add_argument('--world-size', default=-1, type=int,
-                    help='number of nodes for distributed training')
-parser.add_argument('--rank', default=-1, type=int,
-                    help='node rank for distributed training')
-parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
-                    help='url used to set up distributed training')
-parser.add_argument('--dist-backend', default='nccl', type=str,
-                    help='distributed backend')
-parser.add_argument('--seed', default=None, type=int,
-                    help='seed for initializing training. ')
-parser.add_argument('--gpu', default=0, type=int,
-                    help='GPU id to use.')
+parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
+parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float, metavar='W', help='weight decay (default: 1e-4)', dest='weight_decay')
+parser.add_argument('-p', '--print-freq', default=10, type=int, metavar='N', help='print frequency (default: 10)')
+parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
+parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', help='evaluate model on validation set')
+parser.add_argument('--plot', dest='plot', action='store_true', default=True, help='plot model trajectories during validation')
+parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model (default: True)')
+parser.add_argument('--no-pretrained', dest='pretrained', action='store_false', help='do not use pre-trained model')
+parser.add_argument('--scale-outputs', dest='scale_outputs', action='store_true', help='scale network outputs (default: True)')
+parser.add_argument('--no-scale-outputs', dest='scale_outputs', action='store_false', help='do not scale network outputs')
+parser.add_argument('--normalize-outputs', dest='normalize_outputs', action='store_true', help='normalize network outputs (default: True)')
+parser.add_argument('--no-normalize-outputs', dest='normalize_outputs', action='store_false', help='do not normalize network outputs')
+parser.add_argument('--world-size', default=-1, type=int, help='number of nodes for distributed training')
+parser.add_argument('--rank', default=-1, type=int, help='node rank for distributed training')
+parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str, help='url used to set up distributed training')
+parser.add_argument('--dist-backend', default='nccl', type=str, help='distributed backend')
+parser.add_argument('--seed', default=None, type=int, help='seed for initializing training. ')
+parser.add_argument('--gpu', default=0, type=int, help='GPU id to use.')
 parser.add_argument('--multiprocessing-distributed', action='store_true',
                     help='Use multi-processing distributed training to launch '
                          'N processes per node, which has N GPUs. This is the '
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 
+parser.set_defaults(pretrained=True)
+parser.set_defaults(scale_outputs=True)
+parser.set_defaults(normalize_outputs=True)
 
 best_names  = ['Avg Loss', 'Path ATE', 'Drift RPE', 'Drift %']
 best_format = ['{:.4e}', '{:.4e}', '{:.4e}', '{:9.6f}%']
@@ -119,6 +102,9 @@ def main():
 
     if args.height <= 0:
         args.height = args.resolution
+
+    if args.model_dir and not os.path.exists(args.model_dir):
+            os.mkdir(args.model_dir)
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -179,18 +165,23 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
     # select the desired dataset
-    train_dataset = create_dataset(args.dataset, root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height))
-    val_dataset = create_dataset(args.dataset, root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height))
-    
+    train_dataset = create_dataset(args.dataset, root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs)
+    val_dataset = create_dataset(args.dataset, root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs)
+
+    val_dataset.load_stats(train_dataset)
+    train_dataset.save_stats(os.path.join(args.model_dir, args.dataset + "_dataset_stats.txt"))    
+
     output_dims = train_dataset.output_dims()
 
     print('=> dataset:  ' + args.dataset)
     print('=> dataset training images:   ' + str(len(train_dataset)))
     print('=> dataset validation images: ' + str(len(val_dataset)))
-    print('=> dataset input channels: ' + str(train_dataset.input_channels))
-    print('=> dataset input mean:     ' + str(train_dataset.input_mean))
-    print('=> dataset input std_dev:  ' + str(train_dataset.input_std))
-    print('=> dataset output dims:    ' + str(output_dims))
+    print('=> dataset input channels:    ' + str(train_dataset.input_channels))
+    print('=> dataset input mean:        ' + str(train_dataset.input_mean))
+    print('=> dataset input std_dev:     ' + str(train_dataset.input_std))
+    print('=> dataset output dims:       ' + str(output_dims))
+    print('=> dataset output scaling:    ' + str(train_dataset.scale_outputs))
+    print('=> dataset output normalize:  ' + str(train_dataset.normalize_outputs))
 
     # data transforms
     normalize = transforms.Normalize(mean=train_dataset.input_mean,
@@ -227,7 +218,7 @@ def main_worker(gpu, ngpus_per_node, args):
         num_workers=args.workers, pin_memory=True)
 
     # determined if using pre-trained (the default)
-    if args.pretrained and not args.no_pretrained:
+    if args.pretrained:
         print("=> using pre-trained model '{}'".format(args.arch))
         pretrained = True
     else:
@@ -398,7 +389,7 @@ def train(train_loader, model, criterion, optimizer, epoch, output_dims, args):
 
 
 #
-# measure model performance across the val dataset
+# measure model performance across the val dataset, plot the trajectory
 #
 def validate(val_loader, model, criterion, epoch, output_dims, args):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -408,7 +399,7 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
         [batch_time, losses], #[batch_time, losses, top1],
         prefix='Test: ')
 
-    # initialize statistics
+    # initialize trajectory
     if args.plot:
         import matplotlib.pyplot as plt
 
@@ -418,6 +409,7 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
         position_history = [position]
         position_history_gt = [position_gt]
 
+    # initialize statistics
     path_error    = 0.0
     drift_error   = 0.0
     drift_pct     = 0.0
@@ -447,10 +439,12 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
             if i % args.print_freq == 0:
                 progress.display(i)
 
+            # print inputs/outputs
             if args.evaluate:
                 #print("{:04d}:  IMG={:s}".format(i, str(images)))
                 print("{:04d}:  OUT^={:s}  GT^={:s}".format(i, str(output), str(target)))
 
+            # update the trajectory
             if args.plot:
                 batch_size = len(output)
 
@@ -462,9 +456,14 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
                     if args.evaluate:
                         print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
 
-                    # update the vel/heading pose
-                    translation, orientation = val_loader.dataset.pose_update(orientation, output_unnorm)
-                    translation_gt, orientation_gt = val_loader.dataset.pose_update(orientation_gt, target_unnorm)
+                    try:
+                        # update the vel/heading pose
+                        translation, orientation = val_loader.dataset.pose_update(orientation, output_unnorm)
+                        translation_gt, orientation_gt = val_loader.dataset.pose_update(orientation_gt, target_unnorm)
+                    except:
+                        # early on in training, exceptions may fly from invalid quaternion operations
+                        # from erroneous network outputs - ignore them, they should disappear over time
+                        print('exception: ' + str(sys.exc_info()[1]))
 
                     # update the next position
                     position = vector_add(position, translation)
@@ -487,7 +486,7 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
         path_error *= 1.0 / float(N)
         drift_error *= 1.0 / float(N)
 
-        # plot the path data
+        # plot the trajectory path
         if args.plot:
              # split from [[x,y,z]] -> [[x],[y],[z]]	
              position_history = list(map(list,zip(*position_history)))	

@@ -13,24 +13,24 @@ class MichiganIndoorDataset(Dataset):
 	"""https://deepblue.lib.umich.edu/data/concern/data_sets/3t945q88k"""
 
 	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), 
-			   normalize_output=True, scale_output=True, transform=None):
+			   normalize_outputs=True, scale_outputs=True, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
 			transform (callable, optional): Optional transform to be applied
 				on a sample.
 		"""
-		self.type       = type
+		self.type       = type		
 		self.root_dir   = root_dir		
 		self.transform  = transform
 		self.num_images = 0
 		self.images     = []
 		self.poses      = []
 
-		self.input_channels   = input_channels
-		self.input_resolution = input_resolution
-		self.normalize_output = normalize_output
-		self.scale_output 	  = scale_output
+		self.input_channels    = input_channels
+		self.input_resolution  = input_resolution
+		self.normalize_outputs = normalize_outputs
+		self.scale_outputs 	   = scale_outputs
 
 		self.input_mean = [0.15399212, 0.15405144]
 		self.input_std  = [0.05893139, 0.05895483]
@@ -56,6 +56,10 @@ class MichiganIndoorDataset(Dataset):
 		for subdir in img_subdirs:
 			self.search_directory(os.path.join(root_dir, 'dataset', subdir))
 		
+		# calc stats for train
+		if type == 'train':
+			calc_dataset_stats(self)
+
 	def output_dims(self):
 		return 2   # speed, theta delta
 			
@@ -123,10 +127,10 @@ class MichiganIndoorDataset(Dataset):
 		pose_delta = [math.sqrt(pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1]), pose_delta[2]]
 
 		# scale/normalize output
-		if self.scale_output:
+		if self.scale_outputs:
 			pose_delta = scale(pose_delta, self.output_range)
 
-		if self.normalize_output:
+		if self.normalize_outputs:
 			pose_delta = normalize_std(pose_delta, self.output_mean, self.output_std)
 
 		#print('idx {:04d}  {:s}'.format(idx, str(img)))
@@ -150,10 +154,15 @@ class MichiganIndoorDataset(Dataset):
 
 		return [dx, dy], pose			# translation, orientation 
 
-	#def position_update(self, pose):
-	#	dx = pose[0] * math.cos(pose[1])
-	#	dy = pose[0] * math.sin(pose[1])
-	#	return [dx, dy]
+	def load_stats(self, dataset):
+		self.input_mean   = dataset.input_mean
+		self.input_std    = dataset.input_std
+		self.output_range = dataset.output_range
+		self.output_mean  = dataset.output_mean
+		self.output_std   = dataset.output_std
+		
+	def save_stats(self, filename):
+		save_dataset_stats(self, filename)
 
 	def search_directory(self, dir_path):
 		dir_images = []

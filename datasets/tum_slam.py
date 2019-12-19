@@ -15,7 +15,7 @@ class TUMSlamDataset(Dataset):
 	"""https://www.doc.ic.ac.uk/~ahanda/VaFRIC/iclnuim.html"""
 
 	def __init__(self, root_dir, type='train', input_channels=3, input_resolution=(224,224), 
-                  normalize_output=True, scale_output=True, transform=None):
+                  normalize_outputs=True, scale_outputs=True, transform=None):
 		"""
 		Args:
 			root_dir (string): Directory with all the images.
@@ -29,10 +29,10 @@ class TUMSlamDataset(Dataset):
 		self.images     = []
 		self.poses      = []
 
-		self.input_channels   = input_channels
-		self.input_resolution = input_resolution
-		self.normalize_output = normalize_output
-		self.scale_output 	  = scale_output
+		self.input_channels    = input_channels
+		self.input_resolution  = input_resolution
+		self.normalize_outputs = normalize_outputs
+		self.scale_outputs 	   = scale_outputs
 
 		self.input_mean = [0.37613192, 0.37610024]
 		self.input_std = [0.19967583, 0.19966353]
@@ -53,6 +53,10 @@ class TUMSlamDataset(Dataset):
 		self.search_directory(root_dir)
 		print('({:s}) found {:d} images under {:s}'.format(type, self.num_images, root_dir))
 		
+		# calc stats for train
+		if type == 'train':
+			calc_dataset_stats(self)
+
 	def output_dims(self):
 		# https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats#ground-truth_trajectories
 		return 7	# tx, ty, tz, qx, qy, qz, qw
@@ -119,6 +123,9 @@ class TUMSlamDataset(Dataset):
 
 		quat_delta = quat_1.inverse * quat_2				 # relative rotation
 
+		if quat_delta == False:
+			print('warning:  zero quaternion, relative rotation ({:d})'.format(idx))
+
 		translation = [pose_2[n] - pose_1[n] for n in range(3)] # global translation
 		translation = quat_1.rotate(translation)			 # relative translation
 	
@@ -126,10 +133,10 @@ class TUMSlamDataset(Dataset):
 		pose_delta = translation + [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w]
 
 		# scale/normalize output
-		if self.scale_output:
+		if self.scale_outputs:
 			pose_delta = scale(pose_delta, self.output_range)
 
-		if self.normalize_output:
+		if self.normalize_outputs:
 			pose_delta = normalize_std(pose_delta, self.output_mean, self.output_std)
 
 		#print('idx {:04d}  {:s}'.format(idx, str(pose_delta)))
@@ -155,6 +162,16 @@ class TUMSlamDataset(Dataset):
 		next_quat = prev_quat * delta_quat 						# relative -> global rotation
 
 		return translation_rotated, [next_quat.x, next_quat.y, next_quat.z, next_quat.w] 
+
+	def load_stats(self, dataset):
+		self.input_mean   = dataset.input_mean
+		self.input_std    = dataset.input_std
+		self.output_range = dataset.output_range
+		self.output_mean  = dataset.output_mean
+		self.output_std   = dataset.output_std
+		
+	def save_stats(self, filename):
+		save_dataset_stats(self, filename)
 
 	def search_directory(self, path):
 		#print('searching ' + path)
