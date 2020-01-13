@@ -60,6 +60,13 @@ class MichiganIndoorDataset(Dataset):
 		if type == 'train':
 			calc_dataset_stats(self)
 
+	def coordinate_space(self):
+		return { 
+			"x": 0,  # x coordinate
+			"y": -1, # no height in Michigan
+			"z": 1   # z coordinate (depth)
+		}
+
 	def output_dims(self):
 		return 2   # speed, theta delta
 			

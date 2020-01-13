@@ -57,6 +57,13 @@ class TUMSlamDataset(Dataset):
 		if type == 'train':
 			calc_dataset_stats(self)
 
+	def coordinate_space(self):
+		return { 
+			"x": 0,  # x coordinate
+			"y": 2,  # z->y (z is height in TUM RGB-D)
+			"z": 1   # y->z (y is depth in TUM RGB-D)
+		}
+
 	def output_dims(self):
 		# https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats#ground-truth_trajectories
 		return 7	# tx, ty, tz, qx, qy, qz, qw

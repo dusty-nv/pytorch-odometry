@@ -65,6 +65,13 @@ class ColmapDataset(Dataset):
 		if type == 'train':
 			calc_dataset_stats(self)
 
+	def coordinate_space(self):
+		return { 
+			"x": 0,  # x coordinate
+			"y": 1,  # y coordinate (height)
+			"z": 2   # z coordinate (depth)
+		}
+
 	def output_dims(self):
 		if self.predict_orientations:
 			return 7	 # translation + orientation
@@ -233,7 +240,7 @@ class ColmapDataset(Dataset):
 				orientation = [0.0, 0.0, 0.0, 0.0]
 
 		return position, orientation 
-
+ 
 	def load_stats(self, dataset):
 		self.input_mean   = dataset.input_mean
 		self.input_std    = dataset.input_std

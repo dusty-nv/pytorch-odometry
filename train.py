@@ -497,21 +497,24 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 		position_history = list(map(list,zip(*position_history)))	
 		position_history_gt = list(map(list,zip(*position_history_gt)))	
 
-		# create the plots (X/Y and Z, if available)
+		# create the plots (X/Z and Y, if available)
 		num_plots = 2 if len(position_history) > 2 else 1
 		fig, plots = plt.subplots(1, num_plots, figsize=(10, 5))
 
-		# note that in 3D datasets, the Z coordinate is height
-		plots[0].plot(position_history[0], position_history[1], 'b--', label=args.arch)
-		plots[0].plot(position_history_gt[0], position_history_gt[1], 'r--', label='groundtruth')
+		# retrieve the coordinate space mapping
+		cs = val_loader.dataset.coordinate_space()
+
+		# plot the trajectory data
+		plots[0].plot(position_history[cs["x"]], position_history[cs["z"]], 'b--', label=args.arch)
+		plots[0].plot(position_history_gt[cs["x"]], position_history_gt[cs["z"]], 'r--', label='groundtruth')
 		plots[0].set_xlabel("X (meters)")
-		plots[0].set_ylabel("Y (meters)")
+		plots[0].set_ylabel("Z (meters)")
 
 		if num_plots > 1:
-			plots[1].plot(position_history[2], 'b--', label=args.arch)
-			plots[1].plot(position_history_gt[2], 'r--', label='groundtruth')
+			plots[1].plot(position_history[cs["y"]], 'b--', label=args.arch)
+			plots[1].plot(position_history_gt[cs["y"]], 'r--', label='groundtruth')
 			plots[1].set_xlabel("Frame Number")
-			plots[1].set_ylabel("Z (meters)")
+			plots[1].set_ylabel("Y (meters)")
 
 		# set the figure title
 		fig.suptitle('epoch {:d} (loss={:.4e}, N={:d})\npath_ATE={:.4e}, drift_RPE={:4e}, drift={:f}%'.format(epoch, losses.avg, len(val_loader.dataset), path_error, drift_error, drift_pct))
