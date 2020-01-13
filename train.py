@@ -470,7 +470,7 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 					# from erroneous network outputs - ignore them, they should disappear over time
 					print('exception: ' + str(sys.exc_info()[1]))
 
-                    # determine the delta
+				# determine the delta
 				translation = vector_sub(position, position_history[-1])
 				translation_gt = vector_sub(position_gt, position_history_gt[-1])
 
