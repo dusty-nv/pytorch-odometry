@@ -146,13 +146,18 @@ class MichiganIndoorDataset(Dataset):
 		return [0.0, 0.0], [0.0, 0.0]		# position, orientation
 
 	def pose_update(self, pose, delta):
-		pose[0] = delta[0]	 # velocity
-		pose[1] += delta[1]  # heading
+		(position, orientation) = pose
 
-		dx = pose[0] * math.cos(pose[1])
-		dy = pose[0] * math.sin(pose[1])
+		orientation[0] = delta[0]	 # velocity
+		orientation[1] += delta[1]  # heading
 
-		return [dx, dy], pose			# translation, orientation 
+		dx = orientation[0] * math.cos(pose[1])
+		dy = orientation[0] * math.sin(pose[1])
+
+		# TODO if relative/absolute
+		position = vector_add(position, [dx, dy])
+
+		return position, orientation 
 
 	def load_stats(self, dataset):
 		self.input_mean   = dataset.input_mean

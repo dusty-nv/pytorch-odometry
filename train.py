@@ -70,6 +70,10 @@ parser.add_argument('--scale-outputs', dest='scale_outputs', action='store_true'
 parser.add_argument('--no-scale-outputs', dest='scale_outputs', action='store_false', help='do not scale network outputs')
 parser.add_argument('--normalize-outputs', dest='normalize_outputs', action='store_true', help='normalize network outputs (default: True)')
 parser.add_argument('--no-normalize-outputs', dest='normalize_outputs', action='store_false', help='do not normalize network outputs')
+parser.add_argument('--relative-pose', dest='relative_pose', action='store_true', help='compute Relative Pose Estimation (default: True)')
+parser.add_argument('--absolute-pose', dest='relative_pose', action='store_false', help='compute Absolute Pose Estimation')
+parser.add_argument('--predict-orientations', dest='predict_orientations', action='store_true', help='predict pose orientations (default: True)')
+parser.add_argument('--no-orientations', dest='predict_orientations', action='store_false', help='do not predict pose orientations (positions only)')
 parser.add_argument('--world-size', default=-1, type=int, help='number of nodes for distributed training')
 parser.add_argument('--rank', default=-1, type=int, help='node rank for distributed training')
 parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str, help='url used to set up distributed training')
@@ -85,6 +89,8 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 parser.set_defaults(pretrained=True)
 parser.set_defaults(scale_outputs=True)
 parser.set_defaults(normalize_outputs=True)
+parser.set_defaults(relative_pose=True)
+parser.set_defaults(predict_orientations=True)
 
 best_names  = ['Avg Loss', 'Path ATE', 'Drift RPE', 'Drift %']
 best_format = ['{:.4e}', '{:.4e}', '{:.4e}', '{:9.6f}%']
@@ -165,8 +171,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
     # select the desired dataset
-    train_dataset = create_dataset(args.dataset, root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs)
-    val_dataset = create_dataset(args.dataset, root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs)
+    train_dataset = create_dataset(args.dataset, root_dir=args.data, type='train', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs, relative_pose=args.relative_pose, predict_orientations=args.predict_orientations)
+    val_dataset = create_dataset(args.dataset, root_dir=args.data, type='val', input_channels=args.input_channels, input_resolution=(args.width, args.height), scale_outputs=args.scale_outputs, normalize_outputs=args.normalize_outputs, relative_pose=args.relative_pose, predict_orientations=args.predict_orientations)
 
     val_dataset.load_stats(train_dataset)
     train_dataset.save_stats(os.path.join(args.model_dir, args.dataset + "_dataset_stats.txt"))    
@@ -182,6 +188,8 @@ def main_worker(gpu, ngpus_per_node, args):
     print('=> dataset output dims:       ' + str(output_dims))
     print('=> dataset output scaling:    ' + str(train_dataset.scale_outputs))
     print('=> dataset output normalize:  ' + str(train_dataset.normalize_outputs))
+    print('=> dataset relative pose:     ' + str(train_dataset.relative_pose))
+    print('=> dataset pred orientations: ' + str(train_dataset.predict_orientations))
 
     # data transforms
     normalize = transforms.Normalize(mean=train_dataset.input_mean,
@@ -330,6 +338,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 'output_dims': output_dims,
                 'pretrained': pretrained,
                 'state_dict': model.state_dict(),
+                'relative_pose': args.relative_pose,
+                'predict_orientations': args.predict_orientations,
                 'best_loss': val_stats[0], #loss,
                 'path_error': val_stats[1], #path_error,
                 'drift_error': val_stats[2], #drift_error,
@@ -458,16 +468,18 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 
                     try:
                         # update the vel/heading pose
-                        translation, orientation = val_loader.dataset.pose_update(orientation, output_unnorm)
-                        translation_gt, orientation_gt = val_loader.dataset.pose_update(orientation_gt, target_unnorm)
+                        position, orientation = val_loader.dataset.pose_update((position, orientation), output_unnorm)
+                        position_gt, orientation_gt = val_loader.dataset.pose_update((position_gt, orientation_gt), target_unnorm)
                     except:
                         # early on in training, exceptions may fly from invalid quaternion operations
                         # from erroneous network outputs - ignore them, they should disappear over time
                         print('exception: ' + str(sys.exc_info()[1]))
 
                     # update the next position
-                    position = vector_add(position, translation)
-                    position_gt = vector_add(position_gt, translation_gt)
+                    #position = vector_add(position, translation)
+                    #position_gt = vector_add(position_gt, translation_gt)
+                    translation = vector_sub(position, position_history[-1])
+                    translation_gt = vector_sub(position_gt, position_history_gt[-1])
 
                     # compute the errors
                     path_error += distance(position_gt, position)
@@ -558,6 +570,12 @@ def vector_add(a, b):
     for n in range(len(a)):
          v.append(a[n] + b[n])
     return v
+
+def vector_sub(a, b):
+	v = []
+	for n in range(len(a)):
+		v.append(a[n] - b[n])
+	return v
 
 #
 # save model checkpoint

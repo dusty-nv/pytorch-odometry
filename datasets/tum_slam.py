@@ -153,15 +153,18 @@ class TUMSlamDataset(Dataset):
 		return [pose[0], pose[1], pose[2]], [pose[3], pose[4], pose[5], pose[6]]	# position, orientation
 
 	def pose_update(self, pose, delta):
-		prev_quat = Quaternion(pose[3], pose[0], pose[1], pose[2])
+		(position, orientation) = pose
+
+		prev_quat = Quaternion(orientation[3], orientation[0], orientation[1], orientation[2])
 
 		translation = [delta[0], delta[1], delta[2]]					# relative translation
 		delta_quat  = Quaternion(delta[6], delta[3], delta[4], delta[5])	# relative rotation		
 
 		translation_rotated = prev_quat.inverse.rotate(translation)		# relative -> global translation
 		next_quat = prev_quat * delta_quat 						# relative -> global rotation
+		position = vector_add(position, translation_rotated)			# apply global translation
 
-		return translation_rotated, [next_quat.x, next_quat.y, next_quat.z, next_quat.w] 
+		return position, [next_quat.x, next_quat.y, next_quat.z, next_quat.w] 
 
 	def load_stats(self, dataset):
 		self.input_mean   = dataset.input_mean
