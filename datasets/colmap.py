@@ -88,7 +88,10 @@ class ColmapDataset(Dataset):
 
 		# determine which subset this index lies in
 		for n in range(len(self.images)):
-			img_set_length = len(self.images[n]) - 1
+			img_set_length = len(self.images[n])
+
+			if self.relative_pose:
+				img_set_length -= 1
 
 			if idx < img_count + img_set_length:
 				img_set = n
@@ -115,16 +118,16 @@ class ColmapDataset(Dataset):
 		else:
 			img = torch.from_numpy(img.transpose((2, 0, 1)))
 
-		# scale/normalize output
+		# absolute position/orientation
 		pose = self.poses[img_set][img_num][:self.output_dims()]
 
+		# scale/normalize output
 		if self.scale_outputs:
 			pose = scale(pose, self.output_range)
 
 		if self.normalize_outputs:
 			pose = normalize_std(pose, self.output_mean, self.output_std)
 
-		#print('idx {:04d}  {:s}'.format(idx, str(pose)))
 		return img, torch.Tensor(pose)
 
 	def load_relative(self, img_set, img_num):
@@ -163,26 +166,26 @@ class ColmapDataset(Dataset):
 		else:
 			img = torch.from_numpy(img.transpose((2, 0, 1)))
 
-		# calc pose deltas
+		# calc pose deltas:
+		#  - global translation (if not predicting orientations)
+		#  - relative translation/rotation (if predicting orientations)
 		pose_1 = self.poses[img_set][img_num]
 		pose_2 = self.poses[img_set][img_num+1]
 
-		quat_1 = Quaternion(pose_1[6], pose_1[3], pose_1[4], pose_1[5])
-		quat_2 = Quaternion(pose_2[6], pose_2[3], pose_2[4], pose_2[5])
-
-		quat_delta = quat_1.inverse * quat_2				 # relative rotation
-
-		if quat_delta == False:
-			print('warning:  zero quaternion, relative rotation ({:d})'.format(idx))
-
-		translation = [pose_2[n] - pose_1[n] for n in range(3)] # global translation
-		translation = quat_1.rotate(translation)			 # relative translation
-	
-		# combine into [translation, orientation]
-		pose_delta = translation
+		translation = [pose_2[n] - pose_1[n] for n in range(3)] 	# global translation
 
 		if self.predict_orientations:
-			pose_delta += [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w]
+			quat_1 = Quaternion(pose_1[6], pose_1[3], pose_1[4], pose_1[5])
+			quat_2 = Quaternion(pose_2[6], pose_2[3], pose_2[4], pose_2[5])
+
+			quat_delta  = quat_1.inverse * quat_2				 # relative rotation
+			translation = quat_1.rotate(translation)			 # relative translation
+			pose_delta  = translation + [quat_delta.x, quat_delta.y, quat_delta.z, quat_delta.w]
+
+			if quat_delta == False:
+				print('warning:  zero quaternion, relative rotation ({:d})'.format(idx))
+		else:
+			pose_delta = translation
 
 		# scale/normalize output
 		if self.scale_outputs:
@@ -317,6 +320,10 @@ class ColmapDataset(Dataset):
 		self.images.append(dir_images)
 
 		self.num_images += len(dir_images)
+
+		if self.relative_pose:
+			self.num_images -= 1
+
 		print('({:s}) found {:04d} images under {:s}'.format(self.type, len(dir_images), path))
 
 		return True
