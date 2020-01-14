@@ -458,30 +458,30 @@ def validate(val_loader, model, criterion, epoch, output_dims, args):
 					output_unnorm = val_loader.dataset.unnormalize(output.cpu().numpy()[n])
 					target_unnorm = val_loader.dataset.unnormalize(target.cpu().numpy()[n])
 
-				if args.evaluate:
-					print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
+					if args.evaluate:
+						print("{:04d}:  OUT:={:s}  GT:={:s}".format(i, str(output_unnorm), str(target_unnorm)))
 
-				try:
-					# update the vel/heading pose
-					position, orientation = val_loader.dataset.pose_update((position, orientation), output_unnorm)
-					position_gt, orientation_gt = val_loader.dataset.pose_update((position_gt, orientation_gt), target_unnorm)
-				except:
-					# early on in training, exceptions may fly from invalid quaternion operations
-					# from erroneous network outputs - ignore them, they should disappear over time
-					print('exception: ' + str(sys.exc_info()[1]))
+					try:
+						# update the vel/heading pose
+						position, orientation = val_loader.dataset.pose_update((position, orientation), output_unnorm)
+						position_gt, orientation_gt = val_loader.dataset.pose_update((position_gt, orientation_gt), target_unnorm)
+					except:
+						# early on in training, exceptions may fly from invalid quaternion operations
+						# from erroneous network outputs - ignore them, they should disappear over time
+						print('exception: ' + str(sys.exc_info()[1]))
 
-				# determine the delta
-				translation = vector_sub(position, position_history[-1])
-				translation_gt = vector_sub(position_gt, position_history_gt[-1])
+					# determine the delta
+					translation = vector_sub(position, position_history[-1])
+					translation_gt = vector_sub(position_gt, position_history_gt[-1])
 
-				# compute the errors
-				path_error += distance(position_gt, position)
-				drift_error += distance(translation_gt, translation)
-				total_dist_gt += magnitude(translation_gt)
+					# compute the errors
+					path_error += distance(position_gt, position)
+					drift_error += distance(translation_gt, translation)
+					total_dist_gt += magnitude(translation_gt)
 
-				# add to position history
-				position_history.append(position)
-				position_history_gt.append(position_gt)
+					# add to position history
+					position_history.append(position)
+					position_history_gt.append(position_gt)
 
 
 	# average the statistics
