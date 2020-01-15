@@ -11,6 +11,7 @@ def get_model_names():
 		    and callable(torchvision.models.__dict__[name])]
 
 	names.append("resnet18x")
+	names.append("resnet50x")
 	names.append("vgg8x")
 	names.append("vgg8x_1024")
 	names.append("vgg11x")
@@ -32,6 +33,10 @@ def create_model(arch, pretrained=True, input_channels=3, outputs=1000):
 	if arch == "resnet18x":
 		pretrained = pretrained_available(arch, pretrained, input_channels)
 		model = resnet18x(in_channels=input_channels, pretrained=pretrained)
+
+	elif arch == "resnet50x":
+		pretrained = pretrained_available(arch, pretrained, input_channels)
+		model = resnet50x(in_channels=input_channels, pretrained=pretrained)
 
 	elif arch.startswith("vgg8x"):
 		if pretrained:
