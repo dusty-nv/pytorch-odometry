@@ -27,7 +27,7 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 
 from models import create_model, get_model_names
-from datasets import create_dataset, get_dataset_names
+from datasets import create_dataset, get_dataset_names, DataLoaderCache
 
 model_names = get_model_names()
 dataset_names = get_dataset_names()
@@ -52,6 +52,7 @@ parser.add_argument('--width', default=0, type=int)
 parser.add_argument('--height', default=0, type=int)
 parser.add_argument('--input-channels', default=3, type=int, dest='input_channels')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N', help='number of data loading workers (default: 2)')
+parser.add_argument('--in-memory', dest='in_memory', action='store_true', help='keep dataset loaded in memory (default: False)')
 parser.add_argument('--epochs', default=35, type=int, metavar='N', help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
 parser.add_argument('-b', '--batch-size', default=8, type=int, metavar='N', help='mini-batch size (default: 8)')
@@ -176,7 +177,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
 	output_dims = train_dataset.output_dims()
 
-	print('=> dataset:  ' + args.dataset)
+	print('=> dataset:                   ' + args.dataset)
+	print('=> dataset in memory:         ' + str(args.in_memory))
 	print('=> dataset training images:   ' + str(len(train_dataset)))
 	print('=> dataset validation images: ' + str(len(val_dataset)))
 	print('=> dataset input channels:    ' + str(train_dataset.input_channels))
@@ -214,13 +216,13 @@ def main_worker(gpu, ngpus_per_node, args):
 	else:
 		train_sampler = None
 
-	train_loader = torch.utils.data.DataLoader(
-	   train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-	   num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+	train_loader = DataLoaderCache(train_dataset, in_memory=args.in_memory, 
+		batch_size=args.batch_size, shuffle=(train_sampler is None),
+		num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
-	val_loader = torch.utils.data.DataLoader(
-	   val_dataset, batch_size=args.batch_size, shuffle=False,
-	   num_workers=args.workers, pin_memory=True)
+	val_loader = DataLoaderCache(val_dataset, in_memory=args.in_memory, 
+		batch_size=args.batch_size, shuffle=False,
+		num_workers=args.workers, pin_memory=True)
 
 	# determined if using pre-trained (the default)
 	if args.pretrained:
