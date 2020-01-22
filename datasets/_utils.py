@@ -135,6 +135,8 @@ def save_dataset_stats(dataset, filename):
 		f.write("# dataset root:  {:s}\n".format(dataset.root_dir))
 		f.write("# input channels\n")
 		f.write("{:d}\n".format(dataset.input_channels))
+		f.write("# output dimensions\n")
+		f.write("{:d}\n".format(dataset.output_dims()))
 		f.write("# input mean\n")
 		f.write("{:s}\n".format(str(dataset.input_mean)))
 		f.write("# input std_dev\n")

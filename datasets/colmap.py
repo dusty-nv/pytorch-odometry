@@ -44,19 +44,11 @@ class ColmapDataset(Dataset):
 		self.normalize_outputs    = normalize_outputs
 		self.scale_outputs 	      = scale_outputs
 
-		self.input_mean = [0.15399212, 0.15405144]
-		self.input_std  = [0.05893139, 0.05895483]
-
-		if self.input_channels == 3:
-			self.input_mean.append(0.0)
-			self.input_std.append(1.0)
-		elif self.input_channels == 6:
-			self.input_mean = [0.19206306, 0.14614561, 0.09136458, 0.19207639, 0.14618525, 0.09142792]
-			self.input_std = [0.07504185, 0.05436901, 0.04752706, 0.07504998, 0.05438552, 0.04758745]
-
-		self.output_range = [[0.000000000, 0.112281263], [-0.047858000, 0.069044000]] #[[-1.0, 1.0] for n in range(self.output_dims())]
-		self.output_mean = [0.23120594, 0.41055515]  #[0.21042515, 0.4170771] (these were with T_2 enabled)
-		self.output_std = [0.07026415, 0.06002634]   #[0.05743989, 0.04943629] (these were with T_2 enabled)
+		self.input_mean   = []
+		self.input_std    = []
+		self.output_range = [] 
+		self.output_mean  = []
+		self.output_std   = []
 
 		# recursively load metadata
 		self.search_directory(root_dir)

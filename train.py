@@ -181,6 +181,7 @@ def main_worker(gpu, ngpus_per_node, args):
 	print('=> dataset in memory:         ' + str(args.in_memory))
 	print('=> dataset training images:   ' + str(len(train_dataset)))
 	print('=> dataset validation images: ' + str(len(val_dataset)))
+	print('=> dataset input resolution:  {:d}x{:d}'.format(args.width, args.height))
 	print('=> dataset input channels:    ' + str(train_dataset.input_channels))
 	print('=> dataset input mean:        ' + str(train_dataset.input_mean))
 	print('=> dataset input std_dev:     ' + str(train_dataset.input_std))
