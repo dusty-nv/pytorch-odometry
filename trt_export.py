@@ -16,6 +16,7 @@ parser.add_argument('--input', type=str, default='model_best.pth.tar', help="pat
 parser.add_argument('--output', type=str, default='', help="desired path of converted TensorRT engine (default: <ARCH>.engine)")
 parser.add_argument('--model-dir', type=str, default='', help="directory to look for the input PyTorch model in, and export the converted ONNX model to (if --output doesn't specify a directory)")
 parser.add_argument('--mode', type=str, default='fp16', choices=['fp16', 'fp32', 'int8'])
+parser.add_argument('--max-workspace-size', type=int, default=1024*1024*32, help="TensorRT engine builder max workspace size")
 
 opt = parser.parse_args() 
 print(opt)
@@ -69,8 +70,9 @@ model.eval()
 x = torch.ones((1, input_channels, resolution[0], resolution[1])).cuda()
 print('input size:  {:d}x{:d}x{:d}'.format(resolution[1], resolution[0], input_channels))
 
-#input_names = [ "input_0" ]
-#output_names = [ "output_0" ]
+# set input/output names
+input_names = [ "input_0" ]
+output_names = [ "output_0" ]
 
 # convert to TensorRT feeding sample data as input
 fp16_mode = (opt.mode == "fp16")
@@ -80,7 +82,12 @@ print('creating TensorRT engine...')
 print('  => fp16:  {:s}'.format(str(fp16_mode)))
 print('  => int8:  {:s}'.format(str(int8_mode)))
 
-model_trt = torch2trt(model, [x], fp16_mode=fp16_mode, int8_mode=int8_mode, 
+model_trt = torch2trt(model, [x], 
+				  input_names=input_names, 
+				  output_names=output_names,
+				  fp16_mode=fp16_mode, 
+				  int8_mode=int8_mode, 
+				  max_workspace_size=opt.max_workspace_size,
 				  log_level=trt.Logger.VERBOSE)
 
 print('TensorRT engine created\n')
@@ -90,6 +97,9 @@ y = model(x)
 y_trt = model_trt(x)
 
 print('model output difference:  ' + str(torch.max(torch.abs(y - y_trt))))
+
+print('PyTorch output:  ' + str(y))
+print('TensorRT output: ' + str(y_trt))
 
 # format output model path
 if not opt.output:
